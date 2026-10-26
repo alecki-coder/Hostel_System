@@ -1,7 +1,9 @@
-"""Hostel Management System: Flask application (step 4: session revalidation)."""
+"""Hostel Management System: Flask application (step 6: password policy)."""
 import re
 import secrets
 import sqlite3
+from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 
 from flask import (
@@ -15,7 +17,22 @@ DB_PATH = BASE_DIR / "hostel.db"
 INSTANCE_DIR = BASE_DIR / "instance"
 SECRET_PATH = INSTANCE_DIR / "secret_key"
 
+# Bump this whenever templates/_rules_text.html is edited.
+RULES_VERSION = 1
+
 USERNAME_RE = re.compile(r"^[A-Za-z0-9/_-]{3,40}$")
+
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+
+# Passwords attackers try first. Compared in lowercase.
+COMMON_PASSWORDS = {
+    "password", "password1", "password1!", "password123", "p@ssw0rd",
+    "passw0rd", "passw0rd!", "12345678", "123456789", "1234567890",
+    "11111111", "qwerty123", "qwertyuiop", "iloveyou", "admin123",
+    "admin@123", "welcome1", "welcome123", "letmein1", "abc12345",
+    "changeme", "student123", "hostel123",
+}
 
 # Used to burn the same time on unknown usernames as on real ones,
 # so response timing does not reveal which usernames exist.
@@ -59,6 +76,30 @@ def close_db(exception=None) -> None:
         db.close()
 
 
+# ---------- password policy ----------
+
+def password_problems(password: str, username: str) -> list:
+    """Return a list of reasons the password is too weak (empty = OK)."""
+    problems = []
+    if len(password) < MIN_PASSWORD_LENGTH:
+        problems.append(f"at least {MIN_PASSWORD_LENGTH} characters")
+    if len(password) > MAX_PASSWORD_LENGTH:
+        problems.append(f"at most {MAX_PASSWORD_LENGTH} characters")
+    if not re.search(r"[A-Z]", password):
+        problems.append("an uppercase letter")
+    if not re.search(r"[a-z]", password):
+        problems.append("a lowercase letter")
+    if not re.search(r"[0-9]", password):
+        problems.append("a digit")
+    if not re.search(r"[^A-Za-z0-9\s]", password):
+        problems.append("a symbol such as ! @ # $ %")
+    if password.lower() in COMMON_PASSWORDS:
+        problems.append("to not be a commonly used password")
+    if len(username) >= 3 and username.lower() in password.lower():
+        problems.append("to not contain your registration number")
+    return problems
+
+
 # ---------- session revalidation ----------
 
 @app.before_request
@@ -79,6 +120,21 @@ def load_current_user() -> None:
         return
     session["full_name"] = user["full_name"]
     session["role"] = user["role"]
+
+
+def login_required(role=None):
+    """Require a logged-in user, optionally with a specific role."""
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if "user_id" not in session:
+                flash("Please log in first.", "error")
+                return redirect(url_for("login"))
+            if role is not None and session.get("role") != role:
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 # ---------- CSRF protection ----------
@@ -109,6 +165,48 @@ def security_headers(response):
     return response
 
 
+# ---------- helpers ----------
+
+def hostels_for_gender(gender: str):
+    """Hostels a student of this gender may book, with free beds."""
+    return get_db().execute(
+        """
+        SELECT h.id,
+               h.name,
+               (SELECT COALESCE(SUM(r.capacity), 0)
+                  FROM rooms r WHERE r.hostel_id = h.id)
+               - (SELECT COUNT(*)
+                    FROM bookings b
+                   WHERE b.hostel_id = h.id AND b.status = 'approved') AS available
+          FROM hostels h
+         WHERE h.gender = ?
+         ORDER BY h.name
+        """,
+        (gender,),
+    ).fetchall()
+
+
+def current_booking(student_id: int):
+    return get_db().execute(
+        """
+        SELECT b.status, b.rules_accepted_at, b.rules_version,
+               h.name AS hostel_name, r.room_number
+          FROM bookings b
+          JOIN hostels h ON h.id = b.hostel_id
+          LEFT JOIN rooms r ON r.id = b.room_id
+         WHERE b.student_id = ?
+        """,
+        (student_id,),
+    ).fetchone()
+
+
+def student_gender(student_id: int):
+    row = get_db().execute(
+        "SELECT gender FROM users WHERE id = ?", (student_id,)
+    ).fetchone()
+    return row["gender"] if row else None
+
+
 # ---------- routes ----------
 
 @app.route("/")
@@ -133,6 +231,75 @@ def home():
     return render_template("home.html", hostels=hostels)
 
 
+@app.route("/rules")
+def rules():
+    return render_template("rules.html")
+
+
+@app.route("/book", methods=["GET", "POST"])
+@login_required(role="student")
+def book():
+    student_id = session["user_id"]
+    booking = current_booking(student_id)
+
+    if request.method == "GET":
+        if booking:
+            return render_template("book.html", booking=booking)
+        return render_template(
+            "book.html",
+            booking=None,
+            hostels=hostels_for_gender(student_gender(student_id)),
+            rules_version=RULES_VERSION,
+        )
+
+    # ----- POST: submit a booking request -----
+    def form_with_error(message: str, status: int = 400):
+        flash(message, "error")
+        return render_template(
+            "book.html",
+            booking=None,
+            hostels=hostels_for_gender(student_gender(student_id)),
+            rules_version=RULES_VERSION,
+        ), status
+
+    if booking:
+        flash("You already have a booking.", "error")
+        return redirect(url_for("book"))
+
+    if request.form.get("accept_rules") != "yes":
+        return form_with_error("You must accept the rules and regulations to book.")
+
+    try:
+        hostel_id = int(request.form.get("hostel_id", ""))
+    except ValueError:
+        return form_with_error("Select a valid hostel.")
+
+    # Re-check everything on the server; never trust the form's dropdown.
+    allowed = {h["id"]: h for h in hostels_for_gender(student_gender(student_id))}
+    hostel = allowed.get(hostel_id)
+    if hostel is None:
+        return form_with_error("That hostel is not available for you.", 403)
+    if hostel["available"] <= 0:
+        return form_with_error(f"{hostel['name']} has no free beds.")
+
+    accepted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO bookings (student_id, hostel_id, status, "
+            "rules_accepted_at, rules_version) VALUES (?, ?, 'pending', ?, ?)",
+            (student_id, hostel_id, accepted_at, RULES_VERSION),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        # student_id is UNIQUE: a double-submit lands here.
+        flash("You already have a booking.", "error")
+        return redirect(url_for("book"))
+
+    flash("Booking request submitted. Wait for the warden's decision.", "success")
+    return redirect(url_for("book"))
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
@@ -150,8 +317,10 @@ def register():
         error = "Full name must be 2-100 characters."
     elif gender not in ("M", "F"):
         error = "Select a gender."
-    elif not 8 <= len(password) <= 128:
-        error = "Password must be 8-128 characters."
+    else:
+        problems = password_problems(password, username)
+        if problems:
+            error = "Password is too weak. It needs: " + ", ".join(problems) + "."
 
     if error:
         flash(error, "error")
