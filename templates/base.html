@@ -31,6 +31,9 @@
     {% if session.get('role') == 'student' %}
       <a href="/book">My booking</a>
     {% endif %}
+    {% if session.get('role') == 'warden' %}
+      <a href="/warden">Warden panel</a>
+    {% endif %}
     <span class="spacer"></span>
     {% if session.get('user_id') %}
       <span>{{ session.get('full_name') }} ({{ session.get('role') }})</span>

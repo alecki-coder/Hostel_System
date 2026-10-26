@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Warden panel{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Warden panel</h2>
+
+  <h3>Students per hostel</h3>
+  <table>
+    <tr><th>Hostel</th><th>Students housed</th><th>Beds</th><th>Free</th></tr>
+    {% for h in totals %}
+    <tr>
+      <td>{{ h.name }}</td>
+      <td>{{ h.housed }}</td>
+      <td>{{ h.beds }}</td>
+      <td>{{ h.beds - h.housed }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h3>Pending requests ({{ pending|length }})</h3>
+  {% if pending %}
+  <table>
+    <tr><th>Reg. number</th><th>Name</th><th>Hostel</th><th>Action</th></tr>
+    {% for b in pending %}
+    <tr>
+      <td>{{ b.username }}</td>
+      <td>{{ b.full_name }}</td>
+      <td>{{ b.hostel_name }}</td>
+      <td>
+        <form method="post" action="/warden/approve/{{ b.id }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Approve</button>
+        </form>
+        <form method="post" action="/warden/reject/{{ b.id }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Reject</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p>No pending requests.</p>
+  {% endif %}
+
+  <h3>Housed students ({{ housed|length }})</h3>
+  {% if housed %}
+  <table>
+    <tr><th>Reg. number</th><th>Name</th><th>Hostel</th><th>Room</th><th>Action</th></tr>
+    {% for b in housed %}
+    <tr>
+      <td>{{ b.username }}</td>
+      <td>{{ b.full_name }}</td>
+      <td>{{ b.hostel_name }}</td>
+      <td>{{ b.room_number }}</td>
+      <td>
+        <form method="post" action="/warden/clear/{{ b.id }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Clear</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p>No students are housed yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
