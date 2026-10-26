@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 6: password policy)."""
+"""Hostel Management System: Flask application (step 7: warden panel)."""
 import re
 import secrets
 import sqlite3
@@ -207,7 +207,7 @@ def student_gender(student_id: int):
     return row["gender"] if row else None
 
 
-# ---------- routes ----------
+# ---------- routes: public and student ----------
 
 @app.route("/")
 def home():
@@ -300,6 +300,135 @@ def book():
     return redirect(url_for("book"))
 
 
+# ---------- routes: warden ----------
+
+@app.route("/warden")
+@login_required(role="warden")
+def warden_panel():
+    db = get_db()
+    totals = db.execute(
+        """
+        SELECT h.name,
+               COALESCE((SELECT SUM(r.capacity)
+                           FROM rooms r WHERE r.hostel_id = h.id), 0) AS beds,
+               (SELECT COUNT(*)
+                  FROM bookings b
+                 WHERE b.hostel_id = h.id AND b.status = 'approved') AS housed
+          FROM hostels h
+         ORDER BY h.name
+        """
+    ).fetchall()
+    pending = db.execute(
+        """
+        SELECT b.id, u.username, u.full_name, h.name AS hostel_name
+          FROM bookings b
+          JOIN users u ON u.id = b.student_id
+          JOIN hostels h ON h.id = b.hostel_id
+         WHERE b.status = 'pending'
+         ORDER BY b.created_at, b.id
+        """
+    ).fetchall()
+    housed = db.execute(
+        """
+        SELECT b.id, u.username, u.full_name,
+               h.name AS hostel_name, r.room_number
+          FROM bookings b
+          JOIN users u ON u.id = b.student_id
+          JOIN hostels h ON h.id = b.hostel_id
+          JOIN rooms r ON r.id = b.room_id
+         WHERE b.status = 'approved'
+         ORDER BY h.name, r.room_number, u.username
+        """
+    ).fetchall()
+    return render_template(
+        "warden.html", totals=totals, pending=pending, housed=housed
+    )
+
+
+@app.route("/warden/approve/<int:booking_id>", methods=["POST"])
+@login_required(role="warden")
+def warden_approve(booking_id: int):
+    db = get_db()
+    try:
+        # Lock the database so two approvals cannot claim the same last bed.
+        db.execute("BEGIN IMMEDIATE")
+        booking = db.execute(
+            "SELECT id, hostel_id FROM bookings WHERE id = ? AND status = 'pending'",
+            (booking_id,),
+        ).fetchone()
+        if booking is None:
+            db.rollback()
+            flash("That request is no longer pending.", "error")
+            return redirect(url_for("warden_panel"))
+
+        room = db.execute(
+            """
+            SELECT r.id, r.room_number
+              FROM rooms r
+             WHERE r.hostel_id = ?
+               AND (SELECT COUNT(*) FROM bookings b WHERE b.room_id = r.id) < r.capacity
+             ORDER BY r.room_number
+             LIMIT 1
+            """,
+            (booking["hostel_id"],),
+        ).fetchone()
+        if room is None:
+            db.rollback()
+            flash("No free bed left in that hostel.", "error")
+            return redirect(url_for("warden_panel"))
+
+        db.execute(
+            "UPDATE bookings SET status = 'approved', room_id = ? WHERE id = ?",
+            (room["id"], booking_id),
+        )
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        flash("Could not approve the request. Try again.", "error")
+        return redirect(url_for("warden_panel"))
+
+    flash(f"Request approved. Student placed in room {room['room_number']}.", "success")
+    return redirect(url_for("warden_panel"))
+
+
+@app.route("/warden/reject/<int:booking_id>", methods=["POST"])
+@login_required(role="warden")
+def warden_reject(booking_id: int):
+    db = get_db()
+    cur = db.execute(
+        "UPDATE bookings SET status = 'rejected' WHERE id = ? AND status = 'pending'",
+        (booking_id,),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        flash("That request is no longer pending.", "error")
+    else:
+        flash("Request rejected.", "success")
+    return redirect(url_for("warden_panel"))
+
+
+@app.route("/warden/clear/<int:booking_id>", methods=["POST"])
+@login_required(role="warden")
+def warden_clear(booking_id: int):
+    """Clear a student: delete the booking so the bed is free at once.
+
+    No record of the past occupant is kept (data privacy).
+    """
+    db = get_db()
+    cur = db.execute(
+        "DELETE FROM bookings WHERE id = ? AND status = 'approved'",
+        (booking_id,),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        flash("That student is not currently housed.", "error")
+    else:
+        flash("Student cleared. The bed is now free.", "success")
+    return redirect(url_for("warden_panel"))
+
+
+# ---------- routes: accounts ----------
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
@@ -368,6 +497,8 @@ def login():
     session["full_name"] = user["full_name"]
     session["role"] = user["role"]
     flash("Logged in successfully.", "success")
+    if user["role"] == "warden":
+        return redirect(url_for("warden_panel"))
     return redirect(url_for("home"))
 
 
