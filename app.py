@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 7: warden panel)."""
+"""Hostel Management System: Flask application (step 8: resubmission after rejection)."""
 import re
 import secrets
 import sqlite3
@@ -240,29 +240,32 @@ def rules():
 @login_required(role="student")
 def book():
     student_id = session["user_id"]
-    booking = current_booking(student_id)
+    existing = current_booking(student_id)
 
-    if request.method == "GET":
-        if booking:
-            return render_template("book.html", booking=booking)
+    # A rejected request does not block the student: they may try again.
+    rejected = existing is not None and existing["status"] == "rejected"
+    active = existing if existing is not None and not rejected else None
+
+    def render_form(status: int = 200):
         return render_template(
             "book.html",
             booking=None,
-            hostels=hostels_for_gender(student_gender(student_id)),
-            rules_version=RULES_VERSION,
-        )
-
-    # ----- POST: submit a booking request -----
-    def form_with_error(message: str, status: int = 400):
-        flash(message, "error")
-        return render_template(
-            "book.html",
-            booking=None,
+            rejected=rejected,
             hostels=hostels_for_gender(student_gender(student_id)),
             rules_version=RULES_VERSION,
         ), status
 
-    if booking:
+    if request.method == "GET":
+        if active:
+            return render_template("book.html", booking=active)
+        return render_form()
+
+    # ----- POST: submit a booking request -----
+    def form_with_error(message: str, status: int = 400):
+        flash(message, "error")
+        return render_form(status)
+
+    if active:
         flash("You already have a booking.", "error")
         return redirect(url_for("book"))
 
@@ -283,8 +286,14 @@ def book():
         return form_with_error(f"{hostel['name']} has no free beds.")
 
     accepted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    db = get_db()
     try:
-        db = get_db()
+        # Delete the old rejected row (if any) and insert the new request in
+        # one transaction, so a failure never leaves the student with neither.
+        db.execute(
+            "DELETE FROM bookings WHERE student_id = ? AND status = 'rejected'",
+            (student_id,),
+        )
         db.execute(
             "INSERT INTO bookings (student_id, hostel_id, status, "
             "rules_accepted_at, rules_version) VALUES (?, ?, 'pending', ?, ?)",
@@ -293,6 +302,7 @@ def book():
         db.commit()
     except sqlite3.IntegrityError:
         # student_id is UNIQUE: a double-submit lands here.
+        db.rollback()
         flash("You already have a booking.", "error")
         return redirect(url_for("book"))
 
