@@ -5,6 +5,7 @@ PRAGMA foreign_keys = ON;
 
 DROP TRIGGER IF EXISTS room_capacity_insert;
 DROP TRIGGER IF EXISTS room_capacity_update;
+DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS bookings;
 DROP TABLE IF EXISTS rooms;
 DROP TABLE IF EXISTS hostels;
@@ -55,6 +56,17 @@ CREATE TABLE bookings (
         (status <> 'approved' AND room_id IS NULL)
     )
 );
+
+-- Failed login attempts, used for rate limiting.
+-- Rows older than the lockout window are deleted by the app.
+CREATE TABLE login_attempts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT NOT NULL,                   -- lowercase, as typed (capped length)
+    ip           TEXT NOT NULL,
+    attempted_at INTEGER NOT NULL                 -- Unix time in seconds
+);
+CREATE INDEX idx_attempts_username ON login_attempts (username, attempted_at);
+CREATE INDEX idx_attempts_ip       ON login_attempts (ip, attempted_at);
 
 -- Database-level capacity enforcement: even if the app code has a bug,
 -- a room can never exceed its capacity.
