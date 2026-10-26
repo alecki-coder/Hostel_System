@@ -10,9 +10,11 @@ DB_PATH = BASE_DIR / "hostel.db"
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 
 HOSTELS = [
-    ("Hostel A", "M"),
-    ("Hostel B", "M"),
-    ("Hostel C", "F"),
+    ("Berlin", "M"),
+    ("Moscow", "M"),
+    ("Denver", "M"),
+    ("Tokyo", "F"),
+    ("Nairobi", "F"),
 ]
 ROOMS_PER_HOSTEL = 50
 BEDS_PER_ROOM = 4
@@ -45,6 +47,8 @@ def init_db() -> None:
         conn.close()
 
     print(f"Database created at {DB_PATH}")
+    print(f"{len(HOSTELS)} hostels, {len(HOSTELS) * ROOMS_PER_HOSTEL} rooms, "
+          f"{len(HOSTELS) * ROOMS_PER_HOSTEL * BEDS_PER_ROOM} beds")
 
 
 if __name__ == "__main__":

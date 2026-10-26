@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Hostel Management System{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1f2933; }
+    nav { background: #243b53; padding: 12px 24px; display: flex; gap: 16px; align-items: center; }
+    nav a { color: #fff; text-decoration: none; }
+    nav .spacer { flex: 1; }
+    main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+    .card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+    label { display: block; margin-top: 12px; font-weight: 600; }
+    input, select { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 16px; padding: 10px 18px; background: #243b53; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e4e7eb; }
+    .msg { padding: 10px 14px; border-radius: 4px; margin-bottom: 12px; }
+    .msg.error { background: #fde8e8; color: #9b1c1c; }
+    .msg.success { background: #e3f9e5; color: #1f6f2d; }
+  </style>
+</head>
+<body>
+  <nav>
+    <strong>Hostel System</strong>
+    <a href="/">Home</a>
+    <span class="spacer"></span>
+    {% if session.get('user_id') %}
+      <span>{{ session.get('full_name') }} ({{ session.get('role') }})</span>
+      <a href="/logout">Logout</a>
+    {% else %}
+      <a href="/login">Login</a>
+      <a href="/register">Register</a>
+    {% endif %}
+  </nav>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="msg {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

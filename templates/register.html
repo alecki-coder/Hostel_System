@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Student registration</h2>
+  <form method="post" action="/register">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="username">Registration number</label>
+    <input id="username" name="username" required maxlength="40" autocomplete="username">
+
+    <label for="full_name">Full name</label>
+    <input id="full_name" name="full_name" required maxlength="100">
+
+    <label for="gender">Gender</label>
+    <select id="gender" name="gender" required>
+      <option value="" disabled selected>Select</option>
+      <option value="M">Male</option>
+      <option value="F">Female</option>
+    </select>
+
+    <label for="password">Password (minimum 8 characters)</label>
+    <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+
+    <button type="submit">Create account</button>
+  </form>
+</div>
+{% endblock %}

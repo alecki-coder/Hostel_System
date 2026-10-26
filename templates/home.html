@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="card">
+  {% if session.get('user_id') %}
+    <h2>Welcome, {{ session.get('full_name') }}</h2>
+  {% else %}
+    <h2>Hostel Management System</h2>
+    <p><a href="/login">Log in</a> or <a href="/register">register</a> to book a room.</p>
+  {% endif %}
+
+  <h3>Hostel availability</h3>
+  <table>
+    <tr>
+      <th>Hostel</th>
+      <th>For</th>
+      <th>Rooms</th>
+      <th>Beds</th>
+      <th>Occupied</th>
+      <th>Available</th>
+    </tr>
+    {% for h in hostels %}
+    <tr>
+      <td>{{ h.name }}</td>
+      <td>{{ 'Boys' if h.gender == 'M' else 'Girls' }}</td>
+      <td>{{ h.rooms }}</td>
+      <td>{{ h.beds }}</td>
+      <td>{{ h.occupied }}</td>
+      <td>{{ h.beds - h.occupied }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}
