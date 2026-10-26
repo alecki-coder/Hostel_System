@@ -25,7 +25,7 @@ CREATE TABLE users (
 
 CREATE TABLE hostels (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    name   TEXT NOT NULL UNIQUE,                  -- Hostel A, B, C
+    name   TEXT NOT NULL UNIQUE,
     gender TEXT NOT NULL CHECK (gender IN ('M', 'F'))
 );
 
@@ -47,6 +47,7 @@ CREATE TABLE bookings (
     status            TEXT NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending', 'approved', 'rejected')),
     rules_accepted_at TEXT NOT NULL,              -- booking is impossible without acceptance
+    rules_version     INTEGER NOT NULL,           -- which version of the rules was accepted
     created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- an approved booking must have a room; any other status must not
     CHECK (
