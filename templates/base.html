@@ -7,24 +7,30 @@
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1f2933; }
     nav { background: #243b53; padding: 12px 24px; display: flex; gap: 16px; align-items: center; }
-    nav a { color: #fff; text-decoration: none; }
+    nav a, nav strong, nav span { color: #fff; text-decoration: none; }
     nav .spacer { flex: 1; }
     main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
     .card { background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
     label { display: block; margin-top: 12px; font-weight: 600; }
     input, select { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    input[type="checkbox"] { width: auto; margin-right: 8px; }
     button { margin-top: 16px; padding: 10px 18px; background: #243b53; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e4e7eb; }
     .msg { padding: 10px 14px; border-radius: 4px; margin-bottom: 12px; }
     .msg.error { background: #fde8e8; color: #9b1c1c; }
     .msg.success { background: #e3f9e5; color: #1f6f2d; }
+    .rules-box { background: #f9fafb; border: 1px solid #e4e7eb; border-radius: 4px; padding: 8px 24px; margin-top: 12px; }
   </style>
 </head>
 <body>
   <nav>
     <strong>Hostel System</strong>
     <a href="/">Home</a>
+    <a href="/rules">Rules</a>
+    {% if session.get('role') == 'student' %}
+      <a href="/book">My booking</a>
+    {% endif %}
     <span class="spacer"></span>
     {% if session.get('user_id') %}
       <span>{{ session.get('full_name') }} ({{ session.get('role') }})</span>

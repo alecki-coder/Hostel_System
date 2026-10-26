@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Rules and Regulations{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Hostel rules and regulations</h2>
+  <p>Every student must read and accept these rules before booking a room.</p>
+  {% include "_rules_text.html" %}
+</div>
+{% endblock %}

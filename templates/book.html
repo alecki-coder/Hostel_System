@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}My booking{% endblock %}
+{% block content %}
+<div class="card">
+  {% if booking %}
+    <h2>Your booking</h2>
+    <table>
+      <tr><th>Hostel</th><td>{{ booking.hostel_name }}</td></tr>
+      <tr><th>Status</th><td>{{ booking.status|capitalize }}</td></tr>
+      {% if booking.status == 'approved' %}
+        <tr><th>Room</th><td>{{ booking.room_number }}</td></tr>
+      {% endif %}
+      <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at }} (version {{ booking.rules_version }})</td></tr>
+    </table>
+    {% if booking.status == 'pending' %}
+      <p>Your request is waiting for the warden's decision.</p>
+    {% elif booking.status == 'rejected' %}
+      <p>Your request was rejected. Contact the warden for details.</p>
+    {% endif %}
+  {% else %}
+    <h2>Book a room</h2>
+    <form method="post" action="/book">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="hostel_id">Hostel</label>
+      <select id="hostel_id" name="hostel_id" required>
+        <option value="" disabled selected>Select a hostel</option>
+        {% for h in hostels %}
+          <option value="{{ h.id }}" {% if h.available <= 0 %}disabled{% endif %}>
+            {{ h.name }} ({{ h.available }} beds free)
+          </option>
+        {% endfor %}
+      </select>
+
+      <h3>Rules and regulations (version {{ rules_version }})</h3>
+      <div class="rules-box">
+        {% include "_rules_text.html" %}
+      </div>
+
+      <label>
+        <input type="checkbox" name="accept_rules" value="yes" required>
+        I have read and accept the hostel rules and regulations.
+      </label>
+
+      <button type="submit">Submit booking request</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
