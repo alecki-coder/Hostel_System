@@ -12,8 +12,19 @@
     <label for="password">Password</label>
     <input id="password" name="password" type="password" required autocomplete="current-password">
 
+    <label>
+      <input type="checkbox" id="show_password">
+      Show password
+    </label>
+
     <button type="submit">Log in</button>
   </form>
   <p>No account yet? <a href="/register">Register here</a>.</p>
 </div>
+
+<script>
+  document.getElementById("show_password").addEventListener("change", function () {
+    document.getElementById("password").type = this.checked ? "text" : "password";
+  });
+</script>
 {% endblock %}
