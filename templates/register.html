@@ -19,10 +19,22 @@
       <option value="F">Female</option>
     </select>
 
-    <label for="password">Password (minimum 8 characters)</label>
+    <label for="password">Password</label>
     <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+    <small>At least 8 characters, with an uppercase letter, a lowercase letter, a digit and a symbol.</small>
+
+    <label>
+      <input type="checkbox" id="show_password">
+      Show password
+    </label>
 
     <button type="submit">Create account</button>
   </form>
 </div>
+
+<script>
+  document.getElementById("show_password").addEventListener("change", function () {
+    document.getElementById("password").type = this.checked ? "text" : "password";
+  });
+</script>
 {% endblock %}
