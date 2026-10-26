@@ -14,11 +14,12 @@
     </table>
     {% if booking.status == 'pending' %}
       <p>Your request is waiting for the warden's decision.</p>
-    {% elif booking.status == 'rejected' %}
-      <p>Your request was rejected. Contact the warden for details.</p>
     {% endif %}
   {% else %}
     <h2>Book a room</h2>
+    {% if rejected %}
+      <div class="msg error">Your previous request was rejected. You may submit a new one below.</div>
+    {% endif %}
     <form method="post" action="/book">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
