@@ -16,7 +16,8 @@ HOSTELS = [
     ("Tokyo", "F"),
     ("Nairobi", "F"),
 ]
-ROOMS_PER_HOSTEL = 50
+FLOORS_PER_HOSTEL = 5
+ROOMS_PER_FLOOR = 10
 BEDS_PER_ROOM = 4
 
 
@@ -32,12 +33,16 @@ def init_db() -> None:
                 (name, gender),
             )
             hostel_id = cur.lastrowid
+            # Room numbers carry the floor as the first digit: 101-110, 201-210, ...
+            rooms = [
+                (hostel_id, floor, floor * 100 + position, BEDS_PER_ROOM)
+                for floor in range(1, FLOORS_PER_HOSTEL + 1)
+                for position in range(1, ROOMS_PER_FLOOR + 1)
+            ]
             conn.executemany(
-                "INSERT INTO rooms (hostel_id, room_number, capacity) VALUES (?, ?, ?)",
-                [
-                    (hostel_id, number, BEDS_PER_ROOM)
-                    for number in range(1, ROOMS_PER_HOSTEL + 1)
-                ],
+                "INSERT INTO rooms (hostel_id, floor, room_number, capacity) "
+                "VALUES (?, ?, ?, ?)",
+                rooms,
             )
         conn.commit()
     except Exception:
@@ -46,9 +51,10 @@ def init_db() -> None:
     finally:
         conn.close()
 
+    total_rooms = len(HOSTELS) * FLOORS_PER_HOSTEL * ROOMS_PER_FLOOR
     print(f"Database created at {DB_PATH}")
-    print(f"{len(HOSTELS)} hostels, {len(HOSTELS) * ROOMS_PER_HOSTEL} rooms, "
-          f"{len(HOSTELS) * ROOMS_PER_HOSTEL * BEDS_PER_ROOM} beds")
+    print(f"{len(HOSTELS)} hostels, {total_rooms} rooms, "
+          f"{total_rooms * BEDS_PER_ROOM} beds")
 
 
 if __name__ == "__main__":
