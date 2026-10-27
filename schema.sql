@@ -36,7 +36,8 @@ CREATE TABLE hostels (
 CREATE TABLE rooms (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     hostel_id   INTEGER NOT NULL REFERENCES hostels(id),
-    room_number INTEGER NOT NULL,
+    floor       INTEGER NOT NULL CHECK (floor >= 1),
+    room_number INTEGER NOT NULL,                 -- first digit is the floor, e.g. 304
     capacity    INTEGER NOT NULL DEFAULT 4 CHECK (capacity BETWEEN 1 AND 4),
     UNIQUE (hostel_id, room_number)
 );
@@ -48,16 +49,19 @@ CREATE TABLE bookings (
     student_id        INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     hostel_id         INTEGER NOT NULL REFERENCES hostels(id),
     room_id           INTEGER REFERENCES rooms(id),
+    bed_number        INTEGER CHECK (bed_number BETWEEN 1 AND 4),
     status            TEXT NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending', 'approved', 'rejected')),
     rules_accepted_at TEXT NOT NULL,              -- booking is impossible without acceptance
     rules_version     INTEGER NOT NULL,           -- which version of the rules was accepted
     created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- an approved booking must have a room; any other status must not
+    -- an approved booking must have a room and a bed; any other status must have neither
     CHECK (
-        (status = 'approved' AND room_id IS NOT NULL) OR
-        (status <> 'approved' AND room_id IS NULL)
-    )
+        (status = 'approved' AND room_id IS NOT NULL AND bed_number IS NOT NULL) OR
+        (status <> 'approved' AND room_id IS NULL AND bed_number IS NULL)
+    ),
+    -- the same bed in the same room can never be given to two students
+    UNIQUE (room_id, bed_number)
 );
 
 -- Failed login attempts, used for rate limiting.
