@@ -17,11 +17,14 @@ CREATE TABLE users (
     username      TEXT NOT NULL UNIQUE,           -- reg number for students
     full_name     TEXT NOT NULL,
     gender        TEXT CHECK (gender IN ('M', 'F')),
+    email         TEXT UNIQUE,                    -- stored lowercase; used for receipts and password reset
     password_hash TEXT NOT NULL,                  -- never store plain passwords
     role          TEXT NOT NULL CHECK (role IN ('student', 'warden')),
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- students must have a gender, because it decides which hostel they can book
-    CHECK (role = 'warden' OR gender IS NOT NULL)
+    CHECK (role = 'warden' OR gender IS NOT NULL),
+    -- students must have an email, because receipts and resets are sent there
+    CHECK (role = 'warden' OR email IS NOT NULL)
 );
 
 CREATE TABLE hostels (
