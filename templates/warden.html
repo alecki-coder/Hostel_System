@@ -46,13 +46,18 @@
   <h3>Housed students ({{ housed|length }})</h3>
   {% if housed %}
   <table>
-    <tr><th>Reg. number</th><th>Name</th><th>Hostel</th><th>Room</th><th>Action</th></tr>
+    <tr>
+      <th>Reg. number</th><th>Name</th><th>Hostel</th>
+      <th>Floor</th><th>Room</th><th>Bed</th><th>Action</th>
+    </tr>
     {% for b in housed %}
     <tr>
       <td>{{ b.username }}</td>
       <td>{{ b.full_name }}</td>
       <td>{{ b.hostel_name }}</td>
+      <td>{{ b.floor }}</td>
       <td>{{ b.room_number }}</td>
+      <td>{{ b.bed_number }}</td>
       <td>
         <form method="post" action="/warden/clear/{{ b.id }}" style="display:inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

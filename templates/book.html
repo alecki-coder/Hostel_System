@@ -8,7 +8,9 @@
       <tr><th>Hostel</th><td>{{ booking.hostel_name }}</td></tr>
       <tr><th>Status</th><td>{{ booking.status|capitalize }}</td></tr>
       {% if booking.status == 'approved' %}
+        <tr><th>Floor</th><td>{{ booking.floor }}</td></tr>
         <tr><th>Room</th><td>{{ booking.room_number }}</td></tr>
+        <tr><th>Bed</th><td>{{ booking.bed_number }}</td></tr>
       {% endif %}
       <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at }} (version {{ booking.rules_version }})</td></tr>
     </table>
