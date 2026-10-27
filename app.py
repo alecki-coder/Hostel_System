@@ -1,9 +1,9 @@
-"""Hostel Management System: Flask application (step 11: floor, room and bed assignment)."""
+"""Hostel Management System: Flask application (step 12: EAT time display)."""
 import re
 import secrets
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -20,6 +20,9 @@ SECRET_PATH = INSTANCE_DIR / "secret_key"
 
 # Bump this whenever templates/_rules_text.html is edited.
 RULES_VERSION = 1
+
+# East Africa Time (Nairobi): UTC+3, no daylight saving in Kenya.
+EAT = timezone(timedelta(hours=3), "EAT")
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9/_-]{3,40}$")
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -63,6 +66,27 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     MAX_CONTENT_LENGTH=16 * 1024,  # reject oversized request bodies
 )
+
+
+# ---------- time display (EAT) ----------
+
+def to_eat(value) -> str:
+    """Convert a stored UTC timestamp to Nairobi time for display.
+
+    Times are stored in UTC and converted only when shown.
+    """
+    if not value:
+        return ""
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return str(value)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(EAT).strftime("%d %b %Y, %H:%M EAT")
+
+
+app.jinja_env.filters["eat"] = to_eat
 
 
 # ---------- database ----------
