@@ -1,7 +1,8 @@
-"""Hostel Management System: Flask application (step 8: resubmission after rejection)."""
+"""Hostel Management System: Flask application (step 9: login rate limiting)."""
 import re
 import secrets
 import sqlite3
+import time
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -24,6 +25,11 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9/_-]{3,40}$")
 
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
+
+# Login rate limiting. Counts failures inside a sliding window.
+MAX_FAILED_ATTEMPTS = 5          # per username
+MAX_FAILED_ATTEMPTS_PER_IP = 20  # per IP (campus networks share addresses)
+LOCKOUT_SECONDS = 15 * 60
 
 # Passwords attackers try first. Compared in lowercase.
 COMMON_PASSWORDS = {
@@ -98,6 +104,56 @@ def password_problems(password: str, username: str) -> list:
     if len(username) >= 3 and username.lower() in password.lower():
         problems.append("to not contain your registration number")
     return problems
+
+
+# ---------- login rate limiting ----------
+
+def client_ip() -> str:
+    """The connecting address. We deliberately ignore X-Forwarded-For,
+    because without a trusted proxy a client could forge it and dodge
+    the limit."""
+    return request.remote_addr or "unknown"
+
+
+def is_locked_out(username_key: str, ip: str) -> bool:
+    """True if this username or this IP has too many recent failures."""
+    since = int(time.time()) - LOCKOUT_SECONDS
+    db = get_db()
+    user_count = db.execute(
+        "SELECT COUNT(*) FROM login_attempts WHERE username = ? AND attempted_at > ?",
+        (username_key, since),
+    ).fetchone()[0]
+    ip_count = db.execute(
+        "SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND attempted_at > ?",
+        (ip, since),
+    ).fetchone()[0]
+    if user_count >= MAX_FAILED_ATTEMPTS:
+        return True
+    if ip_count >= MAX_FAILED_ATTEMPTS_PER_IP:
+        return True
+    return False
+
+
+def record_failed_login(username_key: str, ip: str) -> None:
+    """Store a failure and delete rows older than the lockout window."""
+    now = int(time.time())
+    db = get_db()
+    db.execute(
+        "DELETE FROM login_attempts WHERE attempted_at <= ?",
+        (now - LOCKOUT_SECONDS,),
+    )
+    db.execute(
+        "INSERT INTO login_attempts (username, ip, attempted_at) VALUES (?, ?, ?)",
+        (username_key, ip, now),
+    )
+    db.commit()
+
+
+def clear_failed_logins(username_key: str) -> None:
+    """A successful login resets that username's failure count."""
+    db = get_db()
+    db.execute("DELETE FROM login_attempts WHERE username = ?", (username_key,))
+    db.commit()
 
 
 # ---------- session revalidation ----------
@@ -489,6 +545,15 @@ def login():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
+    # Same key and message whether or not the username exists, so the lockout
+    # cannot be used to discover real accounts.
+    username_key = username.lower()[:40]
+    ip = client_ip()
+
+    if is_locked_out(username_key, ip):
+        flash("Too many failed attempts. Try again in 15 minutes.", "error")
+        return render_template("login.html"), 429
+
     user = get_db().execute(
         "SELECT id, full_name, role, password_hash FROM users WHERE username = ?",
         (username,),
@@ -498,10 +563,12 @@ def login():
     password_ok = check_password_hash(stored_hash, password)
 
     if not user or not password_ok:
+        record_failed_login(username_key, ip)
         # Same message for unknown user and wrong password.
         flash("Invalid username or password.", "error")
         return render_template("login.html"), 401
 
+    clear_failed_logins(username_key)
     session.clear()  # drop the old session to prevent session fixation
     session["user_id"] = user["id"]
     session["full_name"] = user["full_name"]
