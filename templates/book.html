@@ -12,7 +12,7 @@
         <tr><th>Room</th><td>{{ booking.room_number }}</td></tr>
         <tr><th>Bed</th><td>{{ booking.bed_number }}</td></tr>
       {% endif %}
-      <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at }} (version {{ booking.rules_version }})</td></tr>
+      <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at|eat }} (version {{ booking.rules_version }})</td></tr>
     </table>
     {% if booking.status == 'pending' %}
       <p>Your request is waiting for the warden's decision.</p>
