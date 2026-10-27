@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 9: login rate limiting)."""
+"""Hostel Management System: Flask application (step 11: floor, room and bed assignment)."""
 import re
 import secrets
 import sqlite3
@@ -22,6 +22,8 @@ SECRET_PATH = INSTANCE_DIR / "secret_key"
 RULES_VERSION = 1
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9/_-]{3,40}$")
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+MAX_EMAIL_LENGTH = 120
 
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
@@ -245,8 +247,8 @@ def hostels_for_gender(gender: str):
 def current_booking(student_id: int):
     return get_db().execute(
         """
-        SELECT b.status, b.rules_accepted_at, b.rules_version,
-               h.name AS hostel_name, r.room_number
+        SELECT b.status, b.rules_accepted_at, b.rules_version, b.bed_number,
+               h.name AS hostel_name, r.room_number, r.floor
           FROM bookings b
           JOIN hostels h ON h.id = b.hostel_id
           LEFT JOIN rooms r ON r.id = b.room_id
@@ -396,14 +398,14 @@ def warden_panel():
     ).fetchall()
     housed = db.execute(
         """
-        SELECT b.id, u.username, u.full_name,
-               h.name AS hostel_name, r.room_number
+        SELECT b.id, u.username, u.full_name, b.bed_number,
+               h.name AS hostel_name, r.room_number, r.floor
           FROM bookings b
           JOIN users u ON u.id = b.student_id
           JOIN hostels h ON h.id = b.hostel_id
           JOIN rooms r ON r.id = b.room_id
          WHERE b.status = 'approved'
-         ORDER BY h.name, r.room_number, u.username
+         ORDER BY h.name, r.room_number, b.bed_number
         """
     ).fetchall()
     return render_template(
@@ -427,9 +429,10 @@ def warden_approve(booking_id: int):
             flash("That request is no longer pending.", "error")
             return redirect(url_for("warden_panel"))
 
+        # First room in the hostel that still has a free bed.
         room = db.execute(
             """
-            SELECT r.id, r.room_number
+            SELECT r.id, r.room_number, r.floor, r.capacity
               FROM rooms r
              WHERE r.hostel_id = ?
                AND (SELECT COUNT(*) FROM bookings b WHERE b.room_id = r.id) < r.capacity
@@ -443,9 +446,19 @@ def warden_approve(booking_id: int):
             flash("No free bed left in that hostel.", "error")
             return redirect(url_for("warden_panel"))
 
+        # Lowest bed number in that room that nobody holds.
+        taken = {
+            row["bed_number"]
+            for row in db.execute(
+                "SELECT bed_number FROM bookings WHERE room_id = ?", (room["id"],)
+            )
+        }
+        bed_number = next(n for n in range(1, room["capacity"] + 1) if n not in taken)
+
         db.execute(
-            "UPDATE bookings SET status = 'approved', room_id = ? WHERE id = ?",
-            (room["id"], booking_id),
+            "UPDATE bookings SET status = 'approved', room_id = ?, bed_number = ? "
+            "WHERE id = ?",
+            (room["id"], bed_number, booking_id),
         )
         db.commit()
     except sqlite3.Error:
@@ -453,7 +466,11 @@ def warden_approve(booking_id: int):
         flash("Could not approve the request. Try again.", "error")
         return redirect(url_for("warden_panel"))
 
-    flash(f"Request approved. Student placed in room {room['room_number']}.", "success")
+    flash(
+        f"Request approved. Student placed in floor {room['floor']}, "
+        f"room {room['room_number']}, bed {bed_number}.",
+        "success",
+    )
     return redirect(url_for("warden_panel"))
 
 
@@ -502,6 +519,7 @@ def register():
 
     username = request.form.get("username", "").strip()
     full_name = request.form.get("full_name", "").strip()
+    email = request.form.get("email", "").strip().lower()
     gender = request.form.get("gender", "")
     password = request.form.get("password", "")
 
@@ -510,6 +528,8 @@ def register():
         error = "Registration number must be 3-40 characters: letters, digits, / _ -"
     elif not 2 <= len(full_name) <= 100:
         error = "Full name must be 2-100 characters."
+    elif len(email) > MAX_EMAIL_LENGTH or not EMAIL_RE.fullmatch(email):
+        error = "Enter a valid email address."
     elif gender not in ("M", "F"):
         error = "Select a gender."
     else:
@@ -524,13 +544,14 @@ def register():
     try:
         db = get_db()
         db.execute(
-            "INSERT INTO users (username, full_name, gender, password_hash, role) "
-            "VALUES (?, ?, ?, ?, 'student')",
-            (username, full_name, gender, generate_password_hash(password)),
+            "INSERT INTO users (username, full_name, gender, email, password_hash, role) "
+            "VALUES (?, ?, ?, ?, ?, 'student')",
+            (username, full_name, gender, email, generate_password_hash(password)),
         )
         db.commit()
     except sqlite3.IntegrityError:
-        flash("That registration number is already registered.", "error")
+        # One message for both cases, so it does not say which one matched.
+        flash("That registration number or email address is already registered.", "error")
         return render_template("register.html"), 400
 
     flash("Account created. You can now log in.", "success")
