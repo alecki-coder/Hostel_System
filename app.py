@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 12: EAT time display)."""
+"""Hostel Management System: Flask application (step 13: emailed receipt)."""
 import re
 import secrets
 import sqlite3
@@ -12,6 +12,8 @@ from flask import (
     render_template, request, session, url_for,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from mailer import send_email
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "hostel.db"
@@ -289,6 +291,37 @@ def student_gender(student_id: int):
     return row["gender"] if row else None
 
 
+def build_receipt(details) -> tuple:
+    """Return (subject, body) for the accommodation receipt email."""
+    receipt_number = f"HS-{details['booking_id']:06d}"
+    issued = to_eat(datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    subject = f"Hostel accommodation receipt {receipt_number}"
+    body = (
+        "HOSTEL MANAGEMENT SYSTEM\n"
+        "Accommodation receipt\n"
+        "\n"
+        f"Receipt no:           {receipt_number}\n"
+        f"Date issued:          {issued}\n"
+        "\n"
+        f"Student:              {details['full_name']}\n"
+        f"Registration number:  {details['username']}\n"
+        "\n"
+        f"Hostel:               {details['hostel_name']}\n"
+        f"Floor:                {details['floor']}\n"
+        f"Room:                 {details['room_number']}\n"
+        f"Bed:                  {details['bed_number']}\n"
+        "\n"
+        f"Rules accepted:       version {details['rules_version']}\n"
+        "\n"
+        "Your booking has been approved. Please present this receipt to the\n"
+        "warden when you arrive. Clearing at the end of your stay is done by\n"
+        "the warden and releases your bed immediately.\n"
+        "\n"
+        "This is an automated message. Do not reply to it.\n"
+    )
+    return subject, body
+
+
 # ---------- routes: public and student ----------
 
 @app.route("/")
@@ -495,6 +528,30 @@ def warden_approve(booking_id: int):
         f"room {room['room_number']}, bed {bed_number}.",
         "success",
     )
+
+    # The approval is already saved. A mail problem must never undo it,
+    # so sending happens after the commit and only produces a warning.
+    details = db.execute(
+        """
+        SELECT b.id AS booking_id, b.bed_number, b.rules_version,
+               u.full_name, u.username, u.email,
+               h.name AS hostel_name, r.room_number, r.floor
+          FROM bookings b
+          JOIN users u ON u.id = b.student_id
+          JOIN hostels h ON h.id = b.hostel_id
+          JOIN rooms r ON r.id = b.room_id
+         WHERE b.id = ?
+        """,
+        (booking_id,),
+    ).fetchone()
+    if details is None or not details["email"]:
+        flash("No email address on file, so no receipt was sent.", "error")
+    else:
+        subject, body = build_receipt(details)
+        if send_email(details["email"], subject, body):
+            flash("Receipt emailed to the student.", "success")
+        else:
+            flash("Approved, but the receipt email could not be sent.", "error")
     return redirect(url_for("warden_panel"))
 
 
