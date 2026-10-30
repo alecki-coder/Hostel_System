@@ -5,6 +5,7 @@ PRAGMA foreign_keys = ON;
 
 DROP TRIGGER IF EXISTS room_capacity_insert;
 DROP TRIGGER IF EXISTS room_capacity_update;
+DROP TABLE IF EXISTS password_resets;
 DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS bookings;
 DROP TABLE IF EXISTS rooms;
@@ -13,14 +14,15 @@ DROP TABLE IF EXISTS users;
 
 -- Students and wardens share one table, separated by role.
 CREATE TABLE users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT NOT NULL UNIQUE,           -- reg number for students
-    full_name     TEXT NOT NULL,
-    gender        TEXT CHECK (gender IN ('M', 'F')),
-    email         TEXT UNIQUE,                    -- stored lowercase; used for receipts and password reset
-    password_hash TEXT NOT NULL,                  -- never store plain passwords
-    role          TEXT NOT NULL CHECK (role IN ('student', 'warden')),
-    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT NOT NULL UNIQUE,         -- reg number for students
+    full_name       TEXT NOT NULL,
+    gender          TEXT CHECK (gender IN ('M', 'F')),
+    email           TEXT UNIQUE,                  -- stored lowercase; used for receipts and password reset
+    password_hash   TEXT NOT NULL,                -- never store plain passwords
+    role            TEXT NOT NULL CHECK (role IN ('student', 'warden')),
+    session_version INTEGER NOT NULL DEFAULT 0,   -- raised on password change; ends old sessions
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- students must have a gender, because it decides which hostel they can book
     CHECK (role = 'warden' OR gender IS NOT NULL),
     -- students must have an email, because receipts and resets are sent there
@@ -74,6 +76,18 @@ CREATE TABLE login_attempts (
 );
 CREATE INDEX idx_attempts_username ON login_attempts (username, attempted_at);
 CREATE INDEX idx_attempts_ip       ON login_attempts (ip, attempted_at);
+
+-- Password reset requests. Only a hash of the emailed token is stored,
+-- so reading the database never reveals a usable reset link.
+-- A row is deleted as soon as it is used, so no history is kept.
+CREATE TABLE password_resets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,              -- SHA-256 of the token in the email link
+    expires_at INTEGER NOT NULL,                  -- Unix time in seconds
+    created_at INTEGER NOT NULL                   -- Unix time in seconds
+);
+CREATE INDEX idx_resets_user ON password_resets (user_id, created_at);
 
 -- Database-level capacity enforcement: even if the app code has a bug,
 -- a room can never exceed its capacity.
