@@ -1,7 +1,10 @@
-"""Hostel Management System: Flask application (step 14: rejection email)."""
+"""Hostel Management System: Flask application (step 15: password reset)."""
+import hashlib
+import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -13,12 +16,18 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Importing mailer also loads the .env file into the environment.
 from mailer import send_email
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "hostel.db"
 INSTANCE_DIR = BASE_DIR / "instance"
 SECRET_PATH = INSTANCE_DIR / "secret_key"
+
+# Public address used in emailed links. Set APP_BASE_URL in .env when the
+# site is deployed. It is never taken from the request, because a forged
+# Host header could otherwise point reset emails at an attacker's site.
+BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 
 # Bump this whenever templates/_rules_text.html is edited.
 RULES_VERSION = 1
@@ -37,6 +46,11 @@ MAX_PASSWORD_LENGTH = 128
 MAX_FAILED_ATTEMPTS = 5          # per username
 MAX_FAILED_ATTEMPTS_PER_IP = 20  # per IP (campus networks share addresses)
 LOCKOUT_SECONDS = 15 * 60
+
+# Password reset.
+RESET_LIFETIME_SECONDS = 30 * 60
+RESET_COOLDOWN_SECONDS = 60
+MAX_TOKEN_LENGTH = 100
 
 # Passwords attackers try first. Compared in lowercase.
 COMMON_PASSWORDS = {
@@ -192,14 +206,16 @@ def load_current_user() -> None:
 
     Name and role are refreshed from the database on every request, so a
     deleted account is logged out and a role change takes effect at once.
+    A changed password raises session_version, which ends older sessions.
     """
     user_id = session.get("user_id")
     if user_id is None:
         return
     user = get_db().execute(
-        "SELECT full_name, role FROM users WHERE id = ?", (user_id,)
+        "SELECT full_name, role, session_version FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
-    if user is None:
+    if user is None or user["session_version"] != session.get("session_version", 0):
         session.clear()
         return
     session["full_name"] = user["full_name"]
@@ -339,6 +355,49 @@ def build_rejection_email(details) -> tuple:
         "This is an automated message. Do not reply to it.\n"
     )
     return subject, body
+
+
+def build_reset_email(full_name: str, link: str) -> tuple:
+    """Return (subject, body) for the password reset email."""
+    subject = "Reset your hostel system password"
+    body = (
+        "HOSTEL MANAGEMENT SYSTEM\n"
+        "\n"
+        f"Dear {full_name},\n"
+        "\n"
+        "We received a request to reset your password. To choose a new one,\n"
+        "open this link:\n"
+        "\n"
+        f"{link}\n"
+        "\n"
+        "The link works once and expires in 30 minutes.\n"
+        "\n"
+        "If you did not ask for this, ignore this email. Your password has\n"
+        "not been changed and nobody can use the link without this message.\n"
+        "\n"
+        "This is an automated message. Do not reply to it.\n"
+    )
+    return subject, body
+
+
+def hash_token(token: str) -> str:
+    """Only this hash is stored; the token itself exists only in the email."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def find_valid_reset(token: str):
+    """The reset row for this token, or None if unknown or expired."""
+    if not token or len(token) > MAX_TOKEN_LENGTH:
+        return None
+    return get_db().execute(
+        """
+        SELECT r.id, r.user_id, u.username
+          FROM password_resets r
+          JOIN users u ON u.id = r.user_id
+         WHERE r.token_hash = ? AND r.expires_at > ?
+        """,
+        (hash_token(token), int(time.time())),
+    ).fetchone()
 
 
 # ---------- routes: public and student ----------
@@ -701,7 +760,8 @@ def login():
         return render_template("login.html"), 429
 
     user = get_db().execute(
-        "SELECT id, full_name, role, password_hash FROM users WHERE username = ?",
+        "SELECT id, full_name, role, password_hash, session_version "
+        "FROM users WHERE username = ?",
         (username,),
     ).fetchone()
 
@@ -719,6 +779,7 @@ def login():
     session["user_id"] = user["id"]
     session["full_name"] = user["full_name"]
     session["role"] = user["role"]
+    session["session_version"] = user["session_version"]
     flash("Logged in successfully.", "success")
     if user["role"] == "warden":
         return redirect(url_for("warden_panel"))
@@ -729,6 +790,102 @@ def login():
 def logout():
     session.clear()
     flash("You have been logged out.", "success")
+    return redirect(url_for("login"))
+
+
+# ---------- routes: password reset ----------
+
+@app.route("/forgot", methods=["GET", "POST"])
+def forgot():
+    if request.method == "GET":
+        return render_template("forgot.html")
+
+    email = request.form.get("email", "").strip().lower()
+
+    # Same answer whether or not the address belongs to an account, so this
+    # page cannot be used to find out who is registered.
+    if len(email) <= MAX_EMAIL_LENGTH and EMAIL_RE.fullmatch(email):
+        db = get_db()
+        now = int(time.time())
+        db.execute("DELETE FROM password_resets WHERE expires_at <= ?", (now,))
+        user = db.execute(
+            "SELECT id, full_name FROM users WHERE email = ?", (email,)
+        ).fetchone()
+        if user is not None:
+            recent = db.execute(
+                "SELECT COUNT(*) FROM password_resets "
+                "WHERE user_id = ? AND created_at > ?",
+                (user["id"], now - RESET_COOLDOWN_SECONDS),
+            ).fetchone()[0]
+            if recent == 0:
+                token = secrets.token_urlsafe(32)
+                # One live link per account: a new request replaces the old one.
+                db.execute("DELETE FROM password_resets WHERE user_id = ?", (user["id"],))
+                db.execute(
+                    "INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (user["id"], hash_token(token), now + RESET_LIFETIME_SECONDS, now),
+                )
+                db.commit()
+                subject, body = build_reset_email(
+                    user["full_name"], f"{BASE_URL}/reset/{token}"
+                )
+                # Send in the background so response time is the same whether
+                # or not an email is sent.
+                threading.Thread(
+                    target=send_email, args=(email, subject, body), daemon=True
+                ).start()
+            else:
+                db.commit()
+        else:
+            db.commit()
+
+    flash(
+        "If that address is registered, a reset link has been sent. "
+        "Check your inbox and spam folder.",
+        "success",
+    )
+    return redirect(url_for("login"))
+
+
+@app.route("/reset/<token>", methods=["GET", "POST"])
+def reset(token: str):
+    row = find_valid_reset(token)
+    if row is None:
+        flash("This reset link is invalid or has expired. Request a new one.", "error")
+        return redirect(url_for("forgot"))
+
+    if request.method == "GET":
+        return render_template("reset.html", token=token)
+
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+
+    if password != confirm:
+        flash("The two passwords do not match.", "error")
+        return render_template("reset.html", token=token), 400
+
+    problems = password_problems(password, row["username"])
+    if problems:
+        flash("Password is too weak. It needs: " + ", ".join(problems) + ".", "error")
+        return render_template("reset.html", token=token), 400
+
+    db = get_db()
+    # Raising session_version ends every session opened with the old password.
+    db.execute(
+        "UPDATE users SET password_hash = ?, session_version = session_version + 1 "
+        "WHERE id = ?",
+        (generate_password_hash(password), row["user_id"]),
+    )
+    # The link works once: remove it, and any other link for this account.
+    db.execute("DELETE FROM password_resets WHERE user_id = ?", (row["user_id"],))
+    # Lift any login lockout, so the student can sign in straight away.
+    db.execute(
+        "DELETE FROM login_attempts WHERE username = ?", (row["username"].lower(),)
+    )
+    db.commit()
+
+    flash("Password changed. You can now log in with the new password.", "success")
     return redirect(url_for("login"))
 
 
