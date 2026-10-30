@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Rooms{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Rooms</h2>
+  <p>
+    {% for h in hostels %}
+      <a href="/warden/rooms?hostel={{ h.id }}">{{ h.name }}</a>{% if not loop.last %} | {% endif %}
+    {% endfor %}
+  </p>
+
+  {% if selected %}
+    <h3>{{ selected.name }} ({{ 'boys' if selected.gender == 'M' else 'girls' }})</h3>
+    <p>{{ empty_rooms }} empty rooms, {{ free_beds }} free beds, {{ housed }} students housed.</p>
+
+    <div style="overflow-x:auto">
+    <table>
+      <tr>
+        <th>Floor</th><th>Room</th><th>Occupants</th><th>Students</th><th>Free beds</th>
+      </tr>
+      {% for r in rooms %}
+      <tr>
+        <td>{{ r.floor }}</td>
+        <td>{{ r.room_number }}</td>
+        <td>{{ r.occupants|length }} / {{ r.capacity }}</td>
+        <td>
+          {% for o in r.occupants %}
+            Bed {{ o.bed_number }}: {{ o.full_name }} ({{ o.username }})<br>
+          {% else %}
+            Empty
+          {% endfor %}
+        </td>
+        <td>{{ r.capacity - r.occupants|length }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  {% else %}
+    <p>Choose a hostel above.</p>
+  {% endif %}
+</div>
+{% endblock %}
