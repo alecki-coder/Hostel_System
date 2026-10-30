@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 15: password reset)."""
+"""Hostel Management System: Flask application (step 16: warden rooms page)."""
 import hashlib
 import os
 import re
@@ -545,6 +545,66 @@ def warden_panel():
     ).fetchall()
     return render_template(
         "warden.html", totals=totals, pending=pending, housed=housed
+    )
+
+
+@app.route("/warden/rooms")
+@login_required(role="warden")
+def warden_rooms():
+    """Every room in one hostel: who sleeps there and how many beds are free."""
+    db = get_db()
+    hostels = db.execute(
+        "SELECT id, name, gender FROM hostels ORDER BY name"
+    ).fetchall()
+
+    # type=int means anything that is not a plain number is ignored.
+    hostel_id = request.args.get("hostel", type=int)
+    selected = next((h for h in hostels if h["id"] == hostel_id), None)
+
+    rooms = []
+    empty_rooms = free_beds = housed = 0
+    if selected is not None:
+        room_rows = db.execute(
+            "SELECT id, floor, room_number, capacity FROM rooms "
+            "WHERE hostel_id = ? ORDER BY room_number",
+            (selected["id"],),
+        ).fetchall()
+        occupant_rows = db.execute(
+            """
+            SELECT b.room_id, b.bed_number, u.full_name, u.username
+              FROM bookings b
+              JOIN users u ON u.id = b.student_id
+             WHERE b.status = 'approved' AND b.hostel_id = ?
+             ORDER BY b.room_id, b.bed_number
+            """,
+            (selected["id"],),
+        ).fetchall()
+
+        by_room = {}
+        for row in occupant_rows:
+            by_room.setdefault(row["room_id"], []).append(dict(row))
+
+        for row in room_rows:
+            occupants = by_room.get(row["id"], [])
+            rooms.append({
+                "floor": row["floor"],
+                "room_number": row["room_number"],
+                "capacity": row["capacity"],
+                "occupants": occupants,
+            })
+            housed += len(occupants)
+            free_beds += row["capacity"] - len(occupants)
+            if not occupants:
+                empty_rooms += 1
+
+    return render_template(
+        "rooms.html",
+        hostels=hostels,
+        selected=selected,
+        rooms=rooms,
+        empty_rooms=empty_rooms,
+        free_beds=free_beds,
+        housed=housed,
     )
 
 
