@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Forgot password{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Forgot your password?</h2>
+  <p>Enter the email address you registered with. If it matches an account,
+     we will send a link that lets you choose a new password. The link works
+     once and expires in 30 minutes.</p>
+  <form method="post" action="/forgot">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="email">Email address</label>
+    <input id="email" name="email" type="email" required maxlength="120" autocomplete="email">
+
+    <button type="submit">Send reset link</button>
+  </form>
+  <p><a href="/login">Back to login</a></p>
+</div>
+{% endblock %}
