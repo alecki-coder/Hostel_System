@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 13: emailed receipt)."""
+"""Hostel Management System: Flask application (step 14: rejection email)."""
 import re
 import secrets
 import sqlite3
@@ -322,6 +322,25 @@ def build_receipt(details) -> tuple:
     return subject, body
 
 
+def build_rejection_email(details) -> tuple:
+    """Return (subject, body) telling a student their request was declined."""
+    subject = "Update on your hostel booking request"
+    body = (
+        "HOSTEL MANAGEMENT SYSTEM\n"
+        "\n"
+        f"Dear {details['full_name']},\n"
+        "\n"
+        f"Your request for a room in {details['hostel_name']} hostel "
+        "has been declined by the warden.\n"
+        "\n"
+        "You may log in and submit a new request, or contact the warden's\n"
+        "office to find out more.\n"
+        "\n"
+        "This is an automated message. Do not reply to it.\n"
+    )
+    return subject, body
+
+
 # ---------- routes: public and student ----------
 
 @app.route("/")
@@ -559,15 +578,40 @@ def warden_approve(booking_id: int):
 @login_required(role="warden")
 def warden_reject(booking_id: int):
     db = get_db()
+
+    # Read the student's details first, while the request is still pending.
+    details = db.execute(
+        """
+        SELECT b.id AS booking_id, u.full_name, u.username, u.email,
+               h.name AS hostel_name
+          FROM bookings b
+          JOIN users u ON u.id = b.student_id
+          JOIN hostels h ON h.id = b.hostel_id
+         WHERE b.id = ? AND b.status = 'pending'
+        """,
+        (booking_id,),
+    ).fetchone()
+
     cur = db.execute(
         "UPDATE bookings SET status = 'rejected' WHERE id = ? AND status = 'pending'",
         (booking_id,),
     )
     db.commit()
-    if cur.rowcount == 0:
+    if cur.rowcount == 0 or details is None:
         flash("That request is no longer pending.", "error")
+        return redirect(url_for("warden_panel"))
+
+    flash("Request rejected.", "success")
+
+    # The rejection is already saved. A mail problem must never undo it.
+    if not details["email"]:
+        flash("No email address on file, so no notice was sent.", "error")
     else:
-        flash("Request rejected.", "success")
+        subject, body = build_rejection_email(details)
+        if send_email(details["email"], subject, body):
+            flash("Rejection notice emailed to the student.", "success")
+        else:
+            flash("Rejected, but the notice email could not be sent.", "error")
     return redirect(url_for("warden_panel"))
 
 
