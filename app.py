@@ -1,5 +1,6 @@
-"""Hostel Management System: Flask application (step 17: change password)."""
+"""Hostel Management System: Flask application (step 18: hashed lockout keys)."""
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -149,6 +150,20 @@ def password_problems(password: str, username: str) -> list:
 
 
 # ---------- login rate limiting ----------
+
+def attempt_key(username: str) -> str:
+    """Keyed hash of a username, used instead of the typed text.
+
+    The attempts table must never hold readable input: someone may paste a
+    password into the username box by mistake. The hash is stable, so the
+    lockout still works, but it cannot be turned back into the text.
+    """
+    return hmac.new(
+        app.config["SECRET_KEY"].encode(),
+        username.lower()[:40].encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
 
 def client_ip() -> str:
     """The connecting address. We deliberately ignore X-Forwarded-For,
@@ -811,8 +826,9 @@ def login():
     password = request.form.get("password", "")
 
     # Same key and message whether or not the username exists, so the lockout
-    # cannot be used to discover real accounts.
-    username_key = username.lower()[:40]
+    # cannot be used to discover real accounts. The key is a hash, so the
+    # typed text itself is never stored.
+    username_key = attempt_key(username)
     ip = client_ip()
 
     if is_locked_out(username_key, ip):
@@ -865,7 +881,7 @@ def change_password():
         "SELECT username, password_hash, session_version FROM users WHERE id = ?",
         (session["user_id"],),
     ).fetchone()
-    username_key = user["username"].lower()[:40]
+    username_key = attempt_key(user["username"])
     ip = client_ip()
 
     # A wrong current password counts toward the login lockout, so a stolen
@@ -1002,7 +1018,7 @@ def reset(token: str):
     db.execute("DELETE FROM password_resets WHERE user_id = ?", (row["user_id"],))
     # Lift any login lockout, so the student can sign in straight away.
     db.execute(
-        "DELETE FROM login_attempts WHERE username = ?", (row["username"].lower(),)
+        "DELETE FROM login_attempts WHERE username = ?", (attempt_key(row["username"]),)
     )
     db.commit()
 
