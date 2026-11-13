@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 16: warden rooms page)."""
+"""Hostel Management System: Flask application (step 17: change password)."""
 import hashlib
 import os
 import re
@@ -851,6 +851,67 @@ def logout():
     session.clear()
     flash("You have been logged out.", "success")
     return redirect(url_for("login"))
+
+
+@app.route("/account/password", methods=["GET", "POST"])
+@login_required()
+def change_password():
+    """Change the password of the logged-in user (students and wardens)."""
+    if request.method == "GET":
+        return render_template("change_password.html")
+
+    db = get_db()
+    user = db.execute(
+        "SELECT username, password_hash, session_version FROM users WHERE id = ?",
+        (session["user_id"],),
+    ).fetchone()
+    username_key = user["username"].lower()[:40]
+    ip = client_ip()
+
+    # A wrong current password counts toward the login lockout, so a stolen
+    # session cannot be used to guess it.
+    if is_locked_out(username_key, ip):
+        flash("Too many failed attempts. Try again in 15 minutes.", "error")
+        return render_template("change_password.html"), 429
+
+    current = request.form.get("current", "")
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+
+    if not check_password_hash(user["password_hash"], current):
+        record_failed_login(username_key, ip)
+        flash("Your current password is not correct.", "error")
+        return render_template("change_password.html"), 401
+
+    if password != confirm:
+        flash("The two new passwords do not match.", "error")
+        return render_template("change_password.html"), 400
+
+    if password == current:
+        flash("Choose a password different from the current one.", "error")
+        return render_template("change_password.html"), 400
+
+    problems = password_problems(password, user["username"])
+    if problems:
+        flash("Password is too weak. It needs: " + ", ".join(problems) + ".", "error")
+        return render_template("change_password.html"), 400
+
+    new_version = user["session_version"] + 1
+    db.execute(
+        "UPDATE users SET password_hash = ?, session_version = ? WHERE id = ?",
+        (generate_password_hash(password), new_version, session["user_id"]),
+    )
+    # Any unused reset link for this account is now pointless: remove it.
+    db.execute("DELETE FROM password_resets WHERE user_id = ?", (session["user_id"],))
+    db.commit()
+    clear_failed_logins(username_key)
+
+    # Keep this device signed in; every other session is now out of date.
+    session["session_version"] = new_version
+    flash("Password changed. Other devices have been signed out.", "success")
+    if session.get("role") == "warden":
+        return redirect(url_for("warden_panel"))
+    return redirect(url_for("home"))
 
 
 # ---------- routes: password reset ----------
