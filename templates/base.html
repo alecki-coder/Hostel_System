@@ -6,7 +6,7 @@
   <title>{% block title %}Hostel Management System{% endblock %}</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1f2933; }
-    nav { background: #243b53; padding: 12px 24px; display: flex; gap: 16px; align-items: center; }
+    nav { background: #243b53; padding: 12px 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     nav a, nav strong, nav span { color: #fff; text-decoration: none; }
     nav .spacer { flex: 1; }
     main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
@@ -38,6 +38,7 @@
     <span class="spacer"></span>
     {% if session.get('user_id') %}
       <span>{{ session.get('full_name') }} ({{ session.get('role') }})</span>
+      <a href="/account/password">Change password</a>
       <a href="/logout">Logout</a>
     {% else %}
       <a href="/login">Login</a>
