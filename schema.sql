@@ -67,10 +67,12 @@ CREATE TABLE bookings (
 );
 
 -- Failed login attempts, used for rate limiting.
+-- The username column holds a keyed hash (HMAC) of the username, never the text
+-- that was typed, so a password pasted into the username box is not stored.
 -- Rows older than the lockout window are deleted by the app.
 CREATE TABLE login_attempts (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    username     TEXT NOT NULL,                   -- lowercase, as typed (capped length)
+    username     TEXT NOT NULL,                   -- HMAC-SHA256 of the lowercase username
     ip           TEXT NOT NULL,
     attempted_at INTEGER NOT NULL                 -- Unix time in seconds
 );
