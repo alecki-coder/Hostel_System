@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 18: hashed lockout keys)."""
+"""Hostel Management System: Flask application (step 19: application confirmation email)."""
 import hashlib
 import hmac
 import os
@@ -322,6 +322,40 @@ def student_gender(student_id: int):
     return row["gender"] if row else None
 
 
+def build_application_email(details) -> tuple:
+    """Return (subject, body) confirming that a booking request was received."""
+    request_number = f"HR-{details['booking_id']:06d}"
+    received = to_eat(details["accepted_at"])
+    subject = f"We received your hostel booking request {request_number}"
+    body = (
+        "HOSTEL MANAGEMENT SYSTEM\n"
+        "Booking request received\n"
+        "\n"
+        f"Dear {details['full_name']},\n"
+        "\n"
+        "Thank you. Your application has been received and is now waiting\n"
+        "for the warden to review and verify it.\n"
+        "\n"
+        f"Request no:        {request_number}\n"
+        f"Hostel requested:  {details['hostel_name']}\n"
+        f"Received:          {received}\n"
+        f"Rules accepted:    version {details['rules_version']}\n"
+        "Status:            Pending\n"
+        "\n"
+        "What happens next:\n"
+        "  - You do not need to apply again.\n"
+        "  - You will get another email as soon as the warden decides.\n"
+        "  - If approved, that email is your receipt and shows your floor,\n"
+        "    room and bed.\n"
+        "\n"
+        "If you did not make this request, please contact the warden's\n"
+        "office and change your password.\n"
+        "\n"
+        "This is an automated message. Do not reply to it.\n"
+    )
+    return subject, body
+
+
 def build_receipt(details) -> tuple:
     """Return (subject, body) for the accommodation receipt email."""
     receipt_number = f"HS-{details['booking_id']:06d}"
@@ -502,19 +536,41 @@ def book():
             "DELETE FROM bookings WHERE student_id = ? AND status = 'rejected'",
             (student_id,),
         )
-        db.execute(
+        cur = db.execute(
             "INSERT INTO bookings (student_id, hostel_id, status, "
             "rules_accepted_at, rules_version) VALUES (?, ?, 'pending', ?, ?)",
             (student_id, hostel_id, accepted_at, RULES_VERSION),
         )
         db.commit()
+        booking_id = cur.lastrowid
     except sqlite3.IntegrityError:
         # student_id is UNIQUE: a double-submit lands here.
         db.rollback()
         flash("You already have a booking.", "error")
         return redirect(url_for("book"))
 
-    flash("Booking request submitted. Wait for the warden's decision.", "success")
+    # The request is already saved. Send the confirmation in the background so
+    # a slow or failing mail server can neither delay the page nor undo it.
+    student = db.execute(
+        "SELECT full_name, email FROM users WHERE id = ?", (student_id,)
+    ).fetchone()
+    if student is not None and student["email"]:
+        subject, body = build_application_email({
+            "booking_id": booking_id,
+            "full_name": student["full_name"],
+            "hostel_name": hostel["name"],
+            "accepted_at": accepted_at,
+            "rules_version": RULES_VERSION,
+        })
+        threading.Thread(
+            target=send_email, args=(student["email"], subject, body), daemon=True
+        ).start()
+
+    flash(
+        "Booking request submitted. A confirmation is being sent to your "
+        "registered email. Now wait for the warden's decision.",
+        "success",
+    )
     return redirect(url_for("book"))
 
 
