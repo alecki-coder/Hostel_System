@@ -16,9 +16,9 @@ HOSTELS = [
     ("Tokyo", "F"),
     ("Nairobi", "F"),
 ]
-FLOORS_PER_HOSTEL = 5
-ROOMS_PER_FLOOR = 10
-BEDS_PER_ROOM = 4
+FLOORS_PER_HOSTEL = 2
+ROOMS_PER_FLOOR = 5
+BEDS_PER_ROOM = 2
 
 
 def init_db() -> None:
@@ -33,7 +33,7 @@ def init_db() -> None:
                 (name, gender),
             )
             hostel_id = cur.lastrowid
-            # Room numbers carry the floor as the first digit: 101-110, 201-210, ...
+            # Room numbers carry the floor as the first digit: 101-105, 201-205, ...
             rooms = [
                 (hostel_id, floor, floor * 100 + position, BEDS_PER_ROOM)
                 for floor in range(1, FLOORS_PER_HOSTEL + 1)
