@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Hostel Management System{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="public">
+  <div class="topstrip">
+    <div class="wrap">
+      <span>&#127968; Hostel accommodation &middot; Murang'a University of Technology</span>
+      <span>{% if session.get('user_id') %}Signed in as <b>{{ session.get('full_name') }}</b>{% else %}Apply online, no queues{% endif %}</span>
+    </div>
+  </div>
+  <header class="pubnav">
+    <nav class="wrap">
+      <a class="brand" href="/"><span class="brand-mark">&#127968;</span> Hostel System</a>
+      <div class="pub-links">
+        <a href="/"{% if request.path == '/' %} class="active"{% endif %}>Home</a>
+        <a href="/#hostels">Hostels</a>
+        <a href="/#how">How it works</a>
+        <a href="/rules"{% if request.path == '/rules' %} class="active"{% endif %}>Rules</a>
+      </div>
+      <div class="nav-right">
+        {% if session.get('user_id') %}
+          <a class="link" href="/account/password">Password</a>
+          <a class="btn btn-orange" href="/book">My booking</a>
+          <a class="btn btn-ghost" href="/logout">Logout</a>
+        {% else %}
+          <a class="btn btn-ghost" href="/login">Login</a>
+          <a class="btn btn-orange" href="/register">Apply now</a>
+        {% endif %}
+      </div>
+    </nav>
+  </header>
+  <div class="wrap flashwrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="msg {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+  </div>
+  {% block hero %}{% endblock %}
+  <main class="wrap page">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="pubfoot">
+    <div class="wrap">
+      <div>
+        <h4>Hostel System</h4>
+        <p>Apply for hostel accommodation online. You are told every decision by email, with your exact hostel, floor, room and bed.</p>
+      </div>
+      <div>
+        <h4>Quick links</h4>
+        <a href="/#hostels">Our hostels</a>
+        <a href="/#how">How it works</a>
+        <a href="/rules">Rules and regulations</a>
+      </div>
+      <div>
+        <h4>Get started</h4>
+        <a href="/register">Create an account</a>
+        <a href="/login">Login</a>
+        <a href="/forgot">Forgot password</a>
+      </div>
+    </div>
+    <div class="copy">&copy; Hostel Management System &middot; a student project at Murang'a University of Technology</div>
+  </footer>
+</body>
+</html>

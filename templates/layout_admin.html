@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Hostel Management System{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="admin">
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="/warden"><span class="brand-mark">&#127968;</span> Hostel System</a>
+      <p class="side-label">Menu</p>
+      <a class="side-link{% if request.path == '/warden' %} active{% endif %}" href="/warden"><span class="ico">&#128202;</span> Dashboard</a>
+      <a class="side-link{% if request.path.startswith('/warden/rooms') %} active{% endif %}" href="/warden/rooms"><span class="ico">&#128719;</span> Rooms</a>
+      <a class="side-link{% if request.path == '/' %} active{% endif %}" href="/"><span class="ico">&#127970;</span> Hostel overview</a>
+      <a class="side-link{% if request.path == '/rules' %} active{% endif %}" href="/rules"><span class="ico">&#128220;</span> Rules</a>
+      <p class="side-label">Account</p>
+      <a class="side-link{% if request.path == '/account/password' %} active{% endif %}" href="/account/password"><span class="ico">&#128273;</span> Password</a>
+      <a class="side-link" href="/logout"><span class="ico">&#128682;</span> Logout</a>
+      <div class="side-user">
+        <div class="avatar">{{ (session.get('full_name') or '?')[:1]|upper }}</div>
+        <div><b>{{ session.get('full_name') }}</b><span>Warden</span></div>
+      </div>
+    </aside>
+    <div>
+      <header class="topbar">
+        <div>
+          <h1>{{ self.title() }}</h1>
+          <p class="muted">Warden console</p>
+        </div>
+      </header>
+      <main class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="msg {{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+</body>
+</html>
