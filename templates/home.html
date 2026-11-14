@@ -1,34 +1,85 @@
 {% extends "base.html" %}
 {% block title %}Home{% endblock %}
-{% block content %}
-<div class="card">
-  {% if session.get('user_id') %}
-    <h2>Welcome, {{ session.get('full_name') }}</h2>
-  {% else %}
-    <h2>Hostel Management System</h2>
-    <p><a href="/login">Log in</a> or <a href="/register">register</a> to book a room.</p>
-  {% endif %}
 
-  <h3>Hostel availability</h3>
-  <table>
-    <tr>
-      <th>Hostel</th>
-      <th>For</th>
-      <th>Rooms</th>
-      <th>Beds</th>
-      <th>Occupied</th>
-      <th>Available</th>
-    </tr>
-    {% for h in hostels %}
-    <tr>
-      <td>{{ h.name }}</td>
-      <td>{{ 'Boys' if h.gender == 'M' else 'Girls' }}</td>
-      <td>{{ h.rooms }}</td>
-      <td>{{ h.beds }}</td>
-      <td>{{ h.occupied }}</td>
-      <td>{{ h.beds - h.occupied }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</div>
+{% block hero %}
+{% set total_beds = hostels|sum(attribute='beds') %}
+{% set used_beds = hostels|sum(attribute='occupied') %}
+<section class="hero-pub">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Hostel accommodation</span>
+      <h1>Comfortable and affordable hostel rooms</h1>
+      <p>Apply online, accept the rules, and get your floor, room and bed by email. No queues and no paperwork.</p>
+      <div class="cta">
+        {% if session.get('role') == 'student' %}
+          <a class="btn btn-orange" href="/book">Go to my booking</a>
+        {% else %}
+          <a class="btn btn-orange" href="/register">Apply now</a>
+          <a class="btn btn-outline" href="/login">I have an account</a>
+        {% endif %}
+      </div>
+      <div class="hero-stats">
+        <div><b>{{ hostels|length }}</b><span>Hostels</span></div>
+        <div><b>{{ total_beds }}</b><span>Beds in total</span></div>
+        <div><b>{{ total_beds - used_beds }}</b><span>Beds free now</span></div>
+      </div>
+    </div>
+    <div class="hero-art"><img src="{{ url_for('static', filename='hero.svg') }}" alt="Illustration of a bunk bed"></div>
+  </div>
+</section>
+{% endblock %}
+
+{% block content %}
+{% if session.get('role') == 'warden' %}
+  <div class="card">
+    <div class="card-head"><h3>Hostel overview</h3><a class="btn btn-ghost" style="margin-top:0" href="/warden/rooms">Open rooms</a></div>
+    <div class="hostel-grid">
+      {% for h in hostels %}
+        {% set pct = (h.occupied * 100 // h.beds) if h.beds else 0 %}
+        <div class="hostel">
+          <span class="tag {{ 'boys' if h.gender == 'M' else 'girls' }}">{{ 'Boys' if h.gender == 'M' else 'Girls' }}</span>
+          <h3>{{ h.name }}</h3>
+          <p class="muted">{{ h.rooms }} rooms &middot; {{ h.beds }} beds</p>
+          <div class="meter {{ 'full' if pct >= 100 }}"><span style="width: {{ pct }}%"></span></div>
+          <p class="muted"><b>{{ h.beds - h.occupied }}</b> beds free</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% else %}
+  <section class="sec" id="services">
+    <h2 class="sec-title">Our services</h2><div class="sec-line"></div>
+    <div class="grid3">
+      <div class="service"><div class="ico">&#128719;</div><h3>Clean, shared rooms</h3><p>Two students to a room, in hostels for boys and hostels for girls, kept apart by the system.</p></div>
+      <div class="service"><div class="ico">&#9889;</div><h3>Apply in minutes</h3><p>Create an account, accept the rules and send your request from your phone or laptop.</p></div>
+      <div class="service"><div class="ico">&#128231;</div><h3>Updates by email</h3><p>You get a confirmation, then a receipt with your hostel, floor, room and bed once approved.</p></div>
+    </div>
+  </section>
+
+  <section class="sec" id="hostels">
+    <h2 class="sec-title">Our hostels</h2><div class="sec-line"></div>
+    <div class="hostel-grid">
+      {% for h in hostels %}
+        {% set pct = (h.occupied * 100 // h.beds) if h.beds else 0 %}
+        <div class="hostel">
+          <span class="tag {{ 'boys' if h.gender == 'M' else 'girls' }}">{{ 'Boys' if h.gender == 'M' else 'Girls' }}</span>
+          <h3>{{ h.name }}</h3>
+          <p class="muted">{{ h.rooms }} rooms &middot; {{ h.beds }} beds</p>
+          <div class="meter {{ 'full' if pct >= 100 }}"><span style="width: {{ pct }}%"></span></div>
+          <p class="muted"><b>{{ h.beds - h.occupied }}</b> beds free</p>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="sec" id="how">
+    <h2 class="sec-title">How it works</h2><div class="sec-line"></div>
+    <div class="steps">
+      <div class="step"><h3>Create an account</h3><p>Register with your registration number and email address.</p></div>
+      <div class="step"><h3>Accept the rules</h3><p>Read the hostel rules and tick to accept them when you apply.</p></div>
+      <div class="step"><h3>Warden reviews</h3><p>You get an email that your request was received. The warden then decides.</p></div>
+      <div class="step"><h3>Get your receipt</h3><p>If approved, your receipt shows your floor, room and bed.</p></div>
+    </div>
+  </section>
+{% endif %}
 {% endblock %}
