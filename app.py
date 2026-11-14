@@ -31,7 +31,7 @@ SECRET_PATH = INSTANCE_DIR / "secret_key"
 BASE_URL = os.environ.get("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 
 # Bump this whenever templates/_rules_text.html is edited.
-RULES_VERSION = 1
+RULES_VERSION = 2
 
 # East Africa Time (Nairobi): UTC+3, no daylight saving in Kenya.
 EAT = timezone(timedelta(hours=3), "EAT")
