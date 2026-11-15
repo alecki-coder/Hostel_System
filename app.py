@@ -1,4 +1,4 @@
-"""Hostel Management System: Flask application (step 19: application confirmation email)."""
+"""Hostel Management System: Flask application (step 20: demo fee payments)."""
 import hashlib
 import hmac
 import os
@@ -19,6 +19,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 # Importing mailer also loads the .env file into the environment.
 from mailer import send_email
+from payments import AMOUNTS, FEES, LABELS, new_checkout_id, new_reference
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "hostel.db"
@@ -304,8 +305,8 @@ def hostels_for_gender(gender: str):
 def current_booking(student_id: int):
     return get_db().execute(
         """
-        SELECT b.status, b.rules_accepted_at, b.rules_version, b.bed_number,
-               h.name AS hostel_name, r.room_number, r.floor
+        SELECT b.id AS booking_id, b.status, b.rules_accepted_at, b.rules_version,
+               b.bed_number, h.name AS hostel_name, r.room_number, r.floor
           FROM bookings b
           JOIN hostels h ON h.id = b.hostel_id
           LEFT JOIN rooms r ON r.id = b.room_id
@@ -322,10 +323,104 @@ def student_gender(student_id: int):
     return row["gender"] if row else None
 
 
+# ---------- fees (DEMO payments: no real money moves) ----------
+
+def insert_payment_rows(db, booking_id: int) -> None:
+    """Create the fee rows for a booking (does not commit)."""
+    for kind, _label, amount in FEES:
+        db.execute(
+            "INSERT OR IGNORE INTO payments (booking_id, kind, amount) VALUES (?, ?, ?)",
+            (booking_id, kind, amount),
+        )
+
+
+def ensure_payments(booking_id: int) -> None:
+    db = get_db()
+    insert_payment_rows(db, booking_id)
+    db.commit()
+
+
+def booking_payments(booking_id: int) -> list:
+    rows = get_db().execute(
+        "SELECT kind, amount, status, reference, paid_at FROM payments WHERE booking_id = ?",
+        (booking_id,),
+    ).fetchall()
+    order = {kind: i for i, (kind, _l, _a) in enumerate(FEES)}
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["label"] = LABELS.get(item["kind"], item["kind"])
+        items.append(item)
+    items.sort(key=lambda i: order.get(i["kind"], 99))
+    return items
+
+
+def fee_summary(items: list) -> dict:
+    total = sum(i["amount"] for i in items)
+    paid = sum(i["amount"] for i in items if i["status"] == "paid")
+    paid_kinds = {i["kind"] for i in items if i["status"] == "paid"}
+    sem1 = next((i for i in items if i["kind"] == "semester_1"), None)
+    return {
+        "total": total,
+        "paid": paid,
+        "balance": total - paid,
+        "booking_fee_paid": "booking_fee" in paid_kinds,
+        "keys_ready": {"booking_fee", "semester_1"} <= paid_kinds,
+        "keys_amount_due": sem1["amount"] if sem1 and sem1["status"] != "paid" else 0,
+    }
+
+
+def start_checkout(booking_id: int, kind: str):
+    """Open a payment prompt for one fee. Returns its checkout id, or None."""
+    db = get_db()
+    checkout_id = new_checkout_id()
+    cur = db.execute(
+        "UPDATE payments SET status = 'pending', checkout_id = ? "
+        "WHERE booking_id = ? AND kind = ? AND status IN ('due', 'pending')",
+        (checkout_id, booking_id, kind),
+    )
+    db.commit()
+    return checkout_id if cur.rowcount else None
+
+
+def own_open_payment(checkout_id: str):
+    """The open payment with this checkout id, only if it is the student's own."""
+    if not checkout_id or len(checkout_id) > 64:
+        return None
+    return get_db().execute(
+        """
+        SELECT p.id, p.kind, p.amount, p.booking_id, b.status AS booking_status
+          FROM payments p
+          JOIN bookings b ON b.id = p.booking_id
+         WHERE p.checkout_id = ? AND p.status = 'pending' AND b.student_id = ?
+        """,
+        (checkout_id, session["user_id"]),
+    ).fetchone()
+
+
+def fees_text(summary: dict) -> str:
+    lines = [
+        "",
+        "FEES (demo: no real money moves)",
+        f"Paid so far:  KES {summary['paid']} of KES {summary['total']}",
+        f"Balance:      KES {summary['balance']}",
+    ]
+    if summary["keys_ready"]:
+        lines.append("Keys:         ready for collection from the warden.")
+    else:
+        lines.append(
+            f"Before you collect your keys, pay KES {summary['keys_amount_due']} "
+            "(Semester 1 fees): log in, open My booking and press Pay."
+        )
+        lines.append("Keys are handed over only after that payment.")
+    return "\n".join(lines) + "\n"
+
+
 def build_application_email(details) -> tuple:
     """Return (subject, body) confirming that a booking request was received."""
     request_number = f"HR-{details['booking_id']:06d}"
     received = to_eat(details["accepted_at"])
+    fee = AMOUNTS["booking_fee"]
     subject = f"We received your hostel booking request {request_number}"
     body = (
         "HOSTEL MANAGEMENT SYSTEM\n"
@@ -342,6 +437,10 @@ def build_application_email(details) -> tuple:
         f"Rules accepted:    version {details['rules_version']}\n"
         "Status:            Pending\n"
         "\n"
+        f"To secure your request, pay the KES {fee} booking fee (demo money):\n"
+        "log in, open My booking and press Pay. The warden approves only\n"
+        "requests whose booking fee is paid.\n"
+        "\n"
         "What happens next:\n"
         "  - You do not need to apply again.\n"
         "  - You will get another email as soon as the warden decides.\n"
@@ -356,7 +455,42 @@ def build_application_email(details) -> tuple:
     return subject, body
 
 
-def build_receipt(details) -> tuple:
+def build_payment_email(details) -> tuple:
+    """Return (subject, body) confirming a (demo) payment."""
+    summary = details["summary"]
+    subject = f"Payment received: {details['label']} ({details['reference']})"
+    if details["booking_status"] == "approved":
+        status_line = (
+            "Your keys are ready for collection from the warden."
+            if summary["keys_ready"]
+            else f"Pay KES {summary['keys_amount_due']} (Semester 1 fees) before you collect your keys."
+        )
+    else:
+        status_line = "Your request now waits for the warden's decision."
+    body = (
+        "HOSTEL MANAGEMENT SYSTEM\n"
+        "Payment received (DEMO: no real money was moved)\n"
+        "\n"
+        f"Dear {details['full_name']},\n"
+        "\n"
+        "We received your payment.\n"
+        "\n"
+        f"Item:         {details['label']}\n"
+        f"Amount:       KES {details['amount']}\n"
+        f"Receipt no:   {details['reference']}\n"
+        f"Date:         {to_eat(details['paid_at'])}\n"
+        "\n"
+        f"Paid so far:  KES {summary['paid']} of KES {summary['total']}\n"
+        f"Balance:      KES {summary['balance']}\n"
+        "\n"
+        f"{status_line}\n"
+        "\n"
+        "This is an automated message. Do not reply to it.\n"
+    )
+    return subject, body
+
+
+def build_receipt(details, summary) -> tuple:
     """Return (subject, body) for the accommodation receipt email."""
     receipt_number = f"HS-{details['booking_id']:06d}"
     issued = to_eat(datetime.now(timezone.utc).isoformat(timespec="seconds"))
@@ -377,6 +511,7 @@ def build_receipt(details) -> tuple:
         f"Bed:                  {details['bed_number']}\n"
         "\n"
         f"Rules accepted:       version {details['rules_version']}\n"
+        f"{fees_text(summary)}"
         "\n"
         "Your booking has been approved. Please present this receipt to the\n"
         "warden when you arrive. Clearing at the end of your stay is done by\n"
@@ -387,9 +522,13 @@ def build_receipt(details) -> tuple:
     return subject, body
 
 
-def build_rejection_email(details) -> tuple:
+def build_rejection_email(details, refunded: int = 0) -> tuple:
     """Return (subject, body) telling a student their request was declined."""
     subject = "Update on your hostel booking request"
+    refund_line = (
+        f"Your booking fee of KES {refunded} has been refunded (demo).\n\n"
+        if refunded else ""
+    )
     body = (
         "HOSTEL MANAGEMENT SYSTEM\n"
         "\n"
@@ -398,6 +537,7 @@ def build_rejection_email(details) -> tuple:
         f"Your request for a room in {details['hostel_name']} hostel "
         "has been declined by the warden.\n"
         "\n"
+        f"{refund_line}"
         "You may log in and submit a new request, or contact the warden's\n"
         "office to find out more.\n"
         "\n"
@@ -488,18 +628,31 @@ def book():
     rejected = existing is not None and existing["status"] == "rejected"
     active = existing if existing is not None and not rejected else None
 
+    refunded = 0
+    if rejected:
+        refunded = get_db().execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments "
+            "WHERE booking_id = ? AND status = 'refunded'",
+            (existing["booking_id"],),
+        ).fetchone()[0]
+
     def render_form(status: int = 200):
         return render_template(
             "book.html",
             booking=None,
             rejected=rejected,
+            refunded=refunded,
             hostels=hostels_for_gender(student_gender(student_id)),
             rules_version=RULES_VERSION,
         ), status
 
     if request.method == "GET":
         if active:
-            return render_template("book.html", booking=active)
+            ensure_payments(active["booking_id"])
+            items = booking_payments(active["booking_id"])
+            return render_template(
+                "book.html", booking=active, payments=items, summary=fee_summary(items)
+            )
         return render_form()
 
     # ----- POST: submit a booking request -----
@@ -541,8 +694,9 @@ def book():
             "rules_accepted_at, rules_version) VALUES (?, ?, 'pending', ?, ?)",
             (student_id, hostel_id, accepted_at, RULES_VERSION),
         )
-        db.commit()
         booking_id = cur.lastrowid
+        insert_payment_rows(db, booking_id)
+        db.commit()
     except sqlite3.IntegrityError:
         # student_id is UNIQUE: a double-submit lands here.
         db.rollback()
@@ -567,10 +721,110 @@ def book():
         ).start()
 
     flash(
-        "Booking request submitted. A confirmation is being sent to your "
-        "registered email. Now wait for the warden's decision.",
+        "Booking request submitted. Pay the booking fee now to secure it "
+        "(demo money).",
         "success",
     )
+    checkout_id = start_checkout(booking_id, "booking_fee")
+    if checkout_id:
+        return redirect(url_for("demo_checkout", checkout_id=checkout_id))
+    return redirect(url_for("book"))
+
+
+# ---------- routes: demo payments ----------
+
+@app.route("/pay/<kind>", methods=["POST"])
+@login_required(role="student")
+def pay_start(kind: str):
+    """Start paying one fee. Opens the simulated phone prompt."""
+    if kind not in AMOUNTS:
+        abort(404)
+    booking = current_booking(session["user_id"])
+    if booking is None or booking["status"] not in ("pending", "approved"):
+        flash("You have no active booking to pay for.", "error")
+        return redirect(url_for("book"))
+    if kind != "booking_fee" and booking["status"] != "approved":
+        flash("Semester fees can be paid once the warden has approved your request.", "error")
+        return redirect(url_for("book"))
+    ensure_payments(booking["booking_id"])
+    checkout_id = start_checkout(booking["booking_id"], kind)
+    if checkout_id is None:
+        flash("That fee is already paid.", "error")
+        return redirect(url_for("book"))
+    return redirect(url_for("demo_checkout", checkout_id=checkout_id))
+
+
+@app.route("/pay/demo/<checkout_id>")
+@login_required(role="student")
+def demo_checkout(checkout_id: str):
+    payment = own_open_payment(checkout_id)
+    if payment is None:
+        flash("That payment request is no longer open.", "error")
+        return redirect(url_for("book"))
+    return render_template(
+        "demo_pay.html", payment=payment, label=LABELS[payment["kind"]],
+        checkout_id=checkout_id,
+    )
+
+
+@app.route("/pay/demo/<checkout_id>/approve", methods=["POST"])
+@login_required(role="student")
+def demo_approve(checkout_id: str):
+    """The simulated 'student approved on their phone' step."""
+    payment = own_open_payment(checkout_id)
+    if payment is None:
+        flash("That payment request is no longer open.", "error")
+        return redirect(url_for("book"))
+
+    db = get_db()
+    paid_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    reference = new_reference()
+    cur = db.execute(
+        "UPDATE payments SET status = 'paid', reference = ?, paid_at = ?, checkout_id = NULL "
+        "WHERE id = ? AND status = 'pending'",
+        (reference, paid_at, payment["id"]),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        flash("That payment request is no longer open.", "error")
+        return redirect(url_for("book"))
+
+    label = LABELS[payment["kind"]]
+    student = db.execute(
+        "SELECT full_name, email FROM users WHERE id = ?", (session["user_id"],)
+    ).fetchone()
+    if student is not None and student["email"]:
+        summary = fee_summary(booking_payments(payment["booking_id"]))
+        subject, body = build_payment_email({
+            "full_name": student["full_name"],
+            "label": label,
+            "amount": payment["amount"],
+            "reference": reference,
+            "paid_at": paid_at,
+            "summary": summary,
+            "booking_status": payment["booking_status"],
+        })
+        threading.Thread(
+            target=send_email, args=(student["email"], subject, body), daemon=True
+        ).start()
+
+    flash(f"Payment received: KES {payment['amount']} for {label}. Receipt {reference}.", "success")
+    return redirect(url_for("book"))
+
+
+@app.route("/pay/demo/<checkout_id>/cancel", methods=["POST"])
+@login_required(role="student")
+def demo_cancel(checkout_id: str):
+    payment = own_open_payment(checkout_id)
+    if payment is not None:
+        db = get_db()
+        db.execute(
+            "UPDATE payments SET status = 'due', checkout_id = NULL "
+            "WHERE id = ? AND status = 'pending'",
+            (payment["id"],),
+        )
+        db.commit()
+    flash("Payment cancelled. You can pay later from My booking.", "error")
     return redirect(url_for("book"))
 
 
@@ -594,7 +848,9 @@ def warden_panel():
     ).fetchall()
     pending = db.execute(
         """
-        SELECT b.id, u.username, u.full_name, h.name AS hostel_name
+        SELECT b.id, u.username, u.full_name, h.name AS hostel_name,
+               COALESCE((SELECT p.status FROM payments p
+                          WHERE p.booking_id = b.id AND p.kind = 'booking_fee'), 'due') AS fee_status
           FROM bookings b
           JOIN users u ON u.id = b.student_id
           JOIN hostels h ON h.id = b.hostel_id
@@ -605,7 +861,14 @@ def warden_panel():
     housed = db.execute(
         """
         SELECT b.id, u.username, u.full_name, b.bed_number,
-               h.name AS hostel_name, r.room_number, r.floor
+               h.name AS hostel_name, r.room_number, r.floor,
+               COALESCE((SELECT SUM(p.amount) FROM payments p
+                          WHERE p.booking_id = b.id AND p.status = 'paid'), 0) AS paid_total,
+               COALESCE((SELECT SUM(p.amount) FROM payments p
+                          WHERE p.booking_id = b.id AND p.status <> 'paid'), 0) AS balance,
+               (SELECT COUNT(*) FROM payments p
+                 WHERE p.booking_id = b.id AND p.status = 'paid'
+                   AND p.kind IN ('booking_fee', 'semester_1')) = 2 AS keys_ready
           FROM bookings b
           JOIN users u ON u.id = b.student_id
           JOIN hostels h ON h.id = b.hostel_id
@@ -695,6 +958,16 @@ def warden_approve(booking_id: int):
             flash("That request is no longer pending.", "error")
             return redirect(url_for("warden_panel"))
 
+        # Only requests whose booking fee is paid can be approved.
+        fee = db.execute(
+            "SELECT status FROM payments WHERE booking_id = ? AND kind = 'booking_fee'",
+            (booking_id,),
+        ).fetchone()
+        if fee is None or fee["status"] != "paid":
+            db.rollback()
+            flash("This request cannot be approved yet: the booking fee has not been paid.", "error")
+            return redirect(url_for("warden_panel"))
+
         # First room in the hostel that still has a free bed.
         room = db.execute(
             """
@@ -756,7 +1029,8 @@ def warden_approve(booking_id: int):
     if details is None or not details["email"]:
         flash("No email address on file, so no receipt was sent.", "error")
     else:
-        subject, body = build_receipt(details)
+        summary = fee_summary(booking_payments(booking_id))
+        subject, body = build_receipt(details, summary)
         if send_email(details["email"], subject, body):
             flash("Receipt emailed to the student.", "success")
         else:
@@ -781,23 +1055,37 @@ def warden_reject(booking_id: int):
         """,
         (booking_id,),
     ).fetchone()
+    refunded = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE booking_id = ? AND status = 'paid'",
+        (booking_id,),
+    ).fetchone()[0]
 
     cur = db.execute(
         "UPDATE bookings SET status = 'rejected' WHERE id = ? AND status = 'pending'",
         (booking_id,),
     )
+    if cur.rowcount:
+        # Simulated refund of anything paid; unpaid fees are simply dropped.
+        db.execute(
+            "UPDATE payments SET status = 'refunded' WHERE booking_id = ? AND status = 'paid'",
+            (booking_id,),
+        )
+        db.execute(
+            "DELETE FROM payments WHERE booking_id = ? AND status IN ('due', 'pending')",
+            (booking_id,),
+        )
     db.commit()
     if cur.rowcount == 0 or details is None:
         flash("That request is no longer pending.", "error")
         return redirect(url_for("warden_panel"))
 
-    flash("Request rejected.", "success")
+    flash("Request rejected." + (f" KES {refunded} refunded (demo)." if refunded else ""), "success")
 
     # The rejection is already saved. A mail problem must never undo it.
     if not details["email"]:
         flash("No email address on file, so no notice was sent.", "error")
     else:
-        subject, body = build_rejection_email(details)
+        subject, body = build_rejection_email(details, refunded)
         if send_email(details["email"], subject, body):
             flash("Rejection notice emailed to the student.", "success")
         else:
@@ -810,18 +1098,28 @@ def warden_reject(booking_id: int):
 def warden_clear(booking_id: int):
     """Clear a student: delete the booking so the bed is free at once.
 
-    No record of the past occupant is kept (data privacy).
+    A student with an unpaid balance cannot be cleared. No record of the past
+    occupant is kept (data privacy): the payments go with the booking.
     """
     db = get_db()
-    cur = db.execute(
-        "DELETE FROM bookings WHERE id = ? AND status = 'approved'",
-        (booking_id,),
-    )
-    db.commit()
-    if cur.rowcount == 0:
+    booking = db.execute(
+        "SELECT id FROM bookings WHERE id = ? AND status = 'approved'", (booking_id,)
+    ).fetchone()
+    if booking is None:
         flash("That student is not currently housed.", "error")
-    else:
-        flash("Student cleared. The bed is now free.", "success")
+        return redirect(url_for("warden_panel"))
+
+    balance = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE booking_id = ? AND status <> 'paid'",
+        (booking_id,),
+    ).fetchone()[0]
+    if balance > 0:
+        flash(f"Cannot clear this student: KES {balance} is still unpaid.", "error")
+        return redirect(url_for("warden_panel"))
+
+    db.execute("DELETE FROM bookings WHERE id = ? AND status = 'approved'", (booking_id,))
+    db.commit()
+    flash("Student cleared. The bed is now free.", "success")
     return redirect(url_for("warden_panel"))
 
 
