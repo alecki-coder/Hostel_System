@@ -5,6 +5,7 @@ PRAGMA foreign_keys = ON;
 
 DROP TRIGGER IF EXISTS room_capacity_insert;
 DROP TRIGGER IF EXISTS room_capacity_update;
+DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS password_resets;
 DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS bookings;
@@ -39,7 +40,7 @@ CREATE TABLE rooms (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     hostel_id   INTEGER NOT NULL REFERENCES hostels(id),
     floor       INTEGER NOT NULL CHECK (floor >= 1),
-    room_number INTEGER NOT NULL,                 -- first digit is the floor, e.g. 304
+    room_number INTEGER NOT NULL,                 -- first digit is the floor, e.g. 204
     capacity    INTEGER NOT NULL DEFAULT 4 CHECK (capacity BETWEEN 1 AND 4),
     UNIQUE (hostel_id, room_number)
 );
@@ -65,6 +66,22 @@ CREATE TABLE bookings (
     -- the same bed in the same room can never be given to two students
     UNIQUE (room_id, bed_number)
 );
+
+-- Fee payments for a booking. DEMO MODE: no real money moves.
+-- One row per instalment; deleted with the booking, so no history is kept.
+CREATE TABLE payments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    booking_id  INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('booking_fee', 'semester_1', 'semester_2')),
+    amount      INTEGER NOT NULL CHECK (amount > 0),      -- whole Kenya shillings
+    status      TEXT NOT NULL DEFAULT 'due'
+                CHECK (status IN ('due', 'pending', 'paid', 'refunded')),
+    checkout_id TEXT UNIQUE,                              -- random id of an open payment prompt
+    reference   TEXT UNIQUE,                              -- receipt number once paid
+    paid_at     TEXT,                                     -- UTC, set when paid
+    UNIQUE (booking_id, kind)
+);
+CREATE INDEX idx_payments_booking ON payments (booking_id);
 
 -- Failed login attempts, used for rate limiting.
 -- The username column holds a keyed hash (HMAC) of the username, never the text
