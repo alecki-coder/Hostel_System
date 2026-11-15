@@ -2,9 +2,8 @@
 {% block title %}Warden panel{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>Warden panel</h2>
-
   <h3>Students per hostel</h3>
+  <div class="table-wrap">
   <table>
     <tr><th>Hostel</th><th>Students housed</th><th>Beds</th><th>Free</th></tr>
     {% for h in totals %}
@@ -16,20 +15,28 @@
     </tr>
     {% endfor %}
   </table>
+  </div>
+</div>
 
+<div class="card">
   <h3>Pending requests ({{ pending|length }})</h3>
   {% if pending %}
+  <div class="table-wrap">
   <table>
-    <tr><th>Reg. number</th><th>Name</th><th>Hostel</th><th>Action</th></tr>
+    <tr><th>Reg. number</th><th>Name</th><th>Hostel</th><th>Booking fee</th><th>Action</th></tr>
     {% for b in pending %}
     <tr>
       <td>{{ b.username }}</td>
       <td>{{ b.full_name }}</td>
       <td>{{ b.hostel_name }}</td>
       <td>
+        {% if b.fee_status == 'paid' %}<span class="badge approved">Paid</span>
+        {% else %}<span class="badge pending">Not paid</span>{% endif %}
+      </td>
+      <td>
         <form method="post" action="/warden/approve/{{ b.id }}" style="display:inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit">Approve</button>
+          <button type="submit" {% if b.fee_status != 'paid' %}disabled title="The booking fee has not been paid" style="opacity:.45;cursor:not-allowed"{% endif %}>Approve</button>
         </form>
         <form method="post" action="/warden/reject/{{ b.id }}" style="display:inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -39,16 +46,20 @@
     </tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}
-    <p>No pending requests.</p>
+    <p class="muted">No pending requests.</p>
   {% endif %}
+</div>
 
+<div class="card">
   <h3>Housed students ({{ housed|length }})</h3>
   {% if housed %}
+  <div class="table-wrap">
   <table>
     <tr>
-      <th>Reg. number</th><th>Name</th><th>Hostel</th>
-      <th>Floor</th><th>Room</th><th>Bed</th><th>Action</th>
+      <th>Reg. number</th><th>Name</th><th>Hostel</th><th>Floor</th><th>Room</th><th>Bed</th>
+      <th>Paid</th><th>Balance</th><th>Keys</th><th>Action</th>
     </tr>
     {% for b in housed %}
     <tr>
@@ -58,17 +69,27 @@
       <td>{{ b.floor }}</td>
       <td>{{ b.room_number }}</td>
       <td>{{ b.bed_number }}</td>
+      <td>KES {{ b.paid_total }}</td>
+      <td>
+        {% if b.balance > 0 %}<span class="badge pending">KES {{ b.balance }}</span>
+        {% else %}<span class="badge approved">Cleared</span>{% endif %}
+      </td>
+      <td>
+        {% if b.keys_ready %}<span class="badge approved">Ready</span>
+        {% else %}<span class="badge pending">Not ready</span>{% endif %}
+      </td>
       <td>
         <form method="post" action="/warden/clear/{{ b.id }}" style="display:inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit">Clear</button>
+          <button type="submit" {% if b.balance > 0 %}disabled title="Unpaid balance" style="opacity:.45;cursor:not-allowed"{% endif %}>Clear</button>
         </form>
       </td>
     </tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}
-    <p>No students are housed yet.</p>
+    <p class="muted">No students are housed yet.</p>
   {% endif %}
 </div>
 {% endblock %}
