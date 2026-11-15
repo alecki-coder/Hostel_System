@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Confirm payment (demo){% endblock %}
+{% block content %}
+<div class="card" style="max-width:460px;margin:24px auto;text-align:center">
+  <span class="badge pending" style="font-size:.8rem">DEMO MODE</span>
+  <h2 style="margin-top:12px">M-PESA payment request</h2>
+  <p class="muted">This simulates the prompt that appears on a phone. No real money moves and no PIN is needed.</p>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:18px 0">
+    <div class="muted">Hostel System requests</div>
+    <div style="font-size:2.2rem;font-weight:800;letter-spacing:-.02em">KES {{ payment.amount }}</div>
+    <div class="muted">for {{ label }}</div>
+  </div>
+  <form method="post" action="/pay/demo/{{ checkout_id }}/approve">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-orange" style="margin-top:0;width:100%">Approve payment</button>
+  </form>
+  <form method="post" action="/pay/demo/{{ checkout_id }}/cancel">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost" style="width:100%">Cancel</button>
+  </form>
+</div>
+{% endblock %}

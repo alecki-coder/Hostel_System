@@ -1,52 +1,100 @@
 {% extends "base.html" %}
 {% block title %}My booking{% endblock %}
 {% block content %}
+{% if booking %}
 <div class="card">
-  {% if booking %}
+  <div class="card-head">
     <h2>Your booking</h2>
-    <table>
-      <tr><th>Hostel</th><td>{{ booking.hostel_name }}</td></tr>
-      <tr><th>Status</th><td>{{ booking.status|capitalize }}</td></tr>
-      {% if booking.status == 'approved' %}
-        <tr><th>Floor</th><td>{{ booking.floor }}</td></tr>
-        <tr><th>Room</th><td>{{ booking.room_number }}</td></tr>
-        <tr><th>Bed</th><td>{{ booking.bed_number }}</td></tr>
-      {% endif %}
-      <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at|eat }} (version {{ booking.rules_version }})</td></tr>
-    </table>
-    {% if booking.status == 'pending' %}
-      <p>Your request is waiting for the warden's decision.</p>
+    <span class="badge {{ booking.status }}">{{ booking.status|capitalize }}</span>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Hostel</th><td>{{ booking.hostel_name }}</td></tr>
+    {% if booking.status == 'approved' %}
+      <tr><th>Floor</th><td>{{ booking.floor }}</td></tr>
+      <tr><th>Room</th><td>{{ booking.room_number }}</td></tr>
+      <tr><th>Bed</th><td>{{ booking.bed_number }}</td></tr>
     {% endif %}
-  {% else %}
-    <h2>Book a room</h2>
-    {% if rejected %}
-      <div class="msg error">Your previous request was rejected. You may submit a new one below.</div>
-    {% endif %}
-    <form method="post" action="/book">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-      <label for="hostel_id">Hostel</label>
-      <select id="hostel_id" name="hostel_id" required>
-        <option value="" disabled selected>Select a hostel</option>
-        {% for h in hostels %}
-          <option value="{{ h.id }}" {% if h.available <= 0 %}disabled{% endif %}>
-            {{ h.name }} ({{ h.available }} beds free)
-          </option>
-        {% endfor %}
-      </select>
-
-      <h3>Rules and regulations (version {{ rules_version }})</h3>
-      <div class="rules-box">
-        {% include "_rules_text.html" %}
-      </div>
-
-      <label>
-        <input type="checkbox" name="accept_rules" value="yes" required>
-        I have read and accept the hostel rules and regulations.
-      </label>
-
-      <button type="submit">Submit booking request</button>
-    </form>
+    <tr><th>Rules accepted</th><td>{{ booking.rules_accepted_at|eat }} (version {{ booking.rules_version }})</td></tr>
+  </table>
+  </div>
+  {% if booking.status == 'pending' %}
+    <p class="muted">Pay the booking fee to secure your request. The warden approves only paid requests.</p>
   {% endif %}
 </div>
+
+<div class="card">
+  <div class="card-head">
+    <h3>Fees</h3>
+    <span class="muted">Academic year total: KES {{ summary.total }}</span>
+  </div>
+  <div class="msg success" style="margin-top:8px">Demo mode: no real money moves and no PIN is ever asked.</div>
+  <div class="table-wrap">
+  <table>
+    <tr><th>Item</th><th>Amount</th><th>Status</th><th>Receipt no.</th><th></th></tr>
+    {% for p in payments %}
+    <tr>
+      <td>{{ p.label }}</td>
+      <td>KES {{ p.amount }}</td>
+      <td>
+        {% if p.status == 'paid' %}<span class="badge approved">Paid</span>
+        {% elif p.status == 'refunded' %}<span class="badge rejected">Refunded</span>
+        {% else %}<span class="badge pending">Not paid</span>{% endif %}
+      </td>
+      <td>{{ p.reference or '' }}</td>
+      <td>
+        {% if p.status in ('due', 'pending') and (p.kind == 'booking_fee' or booking.status == 'approved') %}
+          <form method="post" action="/pay/{{ p.kind }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Pay KES {{ p.amount }}</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p>Paid <b>KES {{ summary.paid }}</b> of {{ summary.total }} &middot; Balance <b>KES {{ summary.balance }}</b></p>
+  {% if booking.status == 'approved' %}
+    {% if summary.keys_ready %}
+      <div class="msg success">Your keys are ready. Collect them from the warden.</div>
+    {% else %}
+      <div class="msg error">Before you collect your keys, pay KES {{ summary.keys_amount_due }} (Semester 1 fees). Keys are handed over only after that payment.</div>
+    {% endif %}
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <h2>Book a room</h2>
+  {% if rejected %}
+    <div class="msg error">Your previous request was rejected.{% if refunded %} Your booking fee of KES {{ refunded }} was refunded (demo).{% endif %} You may submit a new one below.</div>
+  {% endif %}
+  <form method="post" action="/book">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="hostel_id">Hostel</label>
+    <select id="hostel_id" name="hostel_id" required>
+      <option value="" disabled selected>Select a hostel</option>
+      {% for h in hostels %}
+        <option value="{{ h.id }}" {% if h.available <= 0 %}disabled{% endif %}>
+          {{ h.name }} ({{ h.available }} beds free)
+        </option>
+      {% endfor %}
+    </select>
+
+    <h3>Rules and regulations (version {{ rules_version }})</h3>
+    <div class="rules-box">
+      {% include "_rules_text.html" %}
+    </div>
+
+    <label>
+      <input type="checkbox" name="accept_rules" value="yes" required>
+      I have read and accept the hostel rules and regulations.
+    </label>
+
+    <p class="muted">After you submit, you pay a KES 10 booking fee to secure your request (demo money).</p>
+    <button type="submit">Submit booking request</button>
+  </form>
+</div>
+{% endif %}
 {% endblock %}
